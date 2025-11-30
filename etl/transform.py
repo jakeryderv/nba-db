@@ -58,8 +58,35 @@ def transform_players():
         print("  Skipping: players.json not found")
         return
 
-    players = load_json(filepath)
-    df = pd.DataFrame(players)
+    data = load_json(filepath)
+
+    # Handle both old static format (list of dicts) and new API format (resultSets)
+    if isinstance(data, list):
+        # Old static format: [{"id": ..., "full_name": ..., ...}, ...]
+        df = pd.DataFrame(data)
+    else:
+        # New CommonAllPlayers API format: {"resultSets": [{"headers": [...], "rowSet": [...]}]}
+        result_set = data.get("resultSets", [{}])[0]
+        headers = result_set.get("headers", [])
+        rows = result_set.get("rowSet", [])
+        df = pd.DataFrame(rows, columns=headers)
+
+        # Map CommonAllPlayers columns to expected output format
+        df = df.rename(columns={
+            "PERSON_ID": "id",
+            "DISPLAY_FIRST_LAST": "full_name",
+        })
+
+        # Extract first/last name from DISPLAY_FIRST_LAST
+        df["first_name"] = df["full_name"].apply(lambda x: x.split(" ")[0] if isinstance(x, str) else "")
+        df["last_name"] = df["full_name"].apply(lambda x: " ".join(x.split(" ")[1:]) if isinstance(x, str) else "")
+
+        # ROSTERSTATUS: 1 = active, 0 = inactive
+        df["is_active"] = df["ROSTERSTATUS"].apply(lambda x: x == 1)
+
+        # Select only needed columns
+        df = df[["id", "full_name", "first_name", "last_name", "is_active"]]
+
     save_csv(df, "players.csv")
 
 

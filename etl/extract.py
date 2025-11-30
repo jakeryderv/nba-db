@@ -10,10 +10,11 @@ import time
 from datetime import datetime
 
 # Static data
-from nba_api.stats.static import teams, players
+from nba_api.stats.static import teams
 
 # Endpoints
 from nba_api.stats.endpoints import (
+    CommonAllPlayers,
     LeagueGameLog,
     PlayerGameLogs,
     BoxScoreTraditionalV3,
@@ -43,20 +44,30 @@ def save_json(data, filepath):
 
 
 def download_static_data():
-    """Download static teams and players data."""
+    """Download teams (static) and players (live API) data."""
     print("\n=== Downloading Static Data ===")
 
-    # Teams
+    # Teams (static is fine, rarely changes)
     all_teams = teams.get_teams()
     save_json(all_teams, os.path.join(DATA_DIR, "teams.json"))
     print(f"  Found {len(all_teams)} teams")
 
-    # Players
-    all_players = players.get_players()
-    save_json(all_players, os.path.join(DATA_DIR, "players.json"))
-    print(f"  Found {len(all_players)} players")
+    # Players (use live API to get current roster)
+    print("  Fetching players from CommonAllPlayers API...")
+    players_response = CommonAllPlayers(
+        is_only_current_season=0,  # 0 = all players, 1 = current season only
+        league_id="00",
+        season=SEASON,
+    )
+    players_data = players_response.get_dict()
+    save_json(players_data, os.path.join(DATA_DIR, "players.json"))
 
-    return all_teams, all_players
+    # Count players from response
+    player_count = len(players_data.get("resultSets", [{}])[0].get("rowSet", []))
+    print(f"  Found {player_count} players")
+    time.sleep(REQUEST_DELAY)
+
+    return all_teams, players_data
 
 
 def download_league_game_log():
@@ -174,15 +185,36 @@ def download_box_scores(game_ids, max_games=50):
             continue
 
 
-def download_shot_chart_detail(all_players, max_players=25):
+def download_shot_chart_detail(players_data, max_players=25):
     """Download ShotChartDetail for players."""
     print("\n=== Downloading ShotChartDetail ===")
     output_dir = os.path.join(DATA_DIR, "ShotChartDetail")
     ensure_dir(output_dir)
 
-    # Get active players only
-    active_players = [p for p in all_players if p.get("is_active", False)]
-    players_to_fetch = active_players[:max_players]
+    # Handle both old static format (list) and new API format (resultSets)
+    if isinstance(players_data, list):
+        # Old format: list of dicts
+        all_players = players_data
+        active_players = [p for p in all_players if p.get("is_active", False)]
+    else:
+        # New CommonAllPlayers format: extract from resultSets
+        result_set = players_data.get("resultSets", [{}])[0]
+        headers = result_set.get("headers", [])
+        rows = result_set.get("rowSet", [])
+
+        # Find column indices
+        id_idx = headers.index("PERSON_ID") if "PERSON_ID" in headers else 0
+        name_idx = headers.index("DISPLAY_FIRST_LAST") if "DISPLAY_FIRST_LAST" in headers else 1
+        status_idx = headers.index("ROSTERSTATUS") if "ROSTERSTATUS" in headers else 2
+
+        # Convert to list of dicts and filter active players (ROSTERSTATUS = 1)
+        active_players = [
+            {"id": row[id_idx], "full_name": row[name_idx]}
+            for row in rows
+            if row[status_idx] == 1
+        ]
+
+    players_to_fetch = active_players[:max_players] if max_players else active_players
 
     print(
         f"  Fetching shot charts for {len(players_to_fetch)} players (limited from {len(active_players)} active)..."
