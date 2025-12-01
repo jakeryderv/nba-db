@@ -1,6 +1,17 @@
 -- NBA Database Schema
 -- Tables for storing NBA statistics data
 
+-- Seasons table (tracks loaded seasons)
+CREATE TABLE seasons (
+    id VARCHAR(10) PRIMARY KEY,  -- e.g., '2024-25'
+    start_year INTEGER NOT NULL,
+    end_year INTEGER NOT NULL,
+    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    games_count INTEGER DEFAULT 0,
+    players_count INTEGER DEFAULT 0,
+    shots_count INTEGER DEFAULT 0
+);
+
 -- Teams table
 CREATE TABLE teams (
     id BIGINT PRIMARY KEY,

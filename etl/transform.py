@@ -2,19 +2,45 @@
 """
 NBA Data Transform Script
 Transforms raw JSON data into clean CSVs for database loading.
+
+Usage:
+    python transform.py                    # Default season (2024-25)
+    python transform.py --season 2023-24   # Specific season
 """
 
-import os
+import argparse
 import json
-import pandas as pd
+import os
 from glob import glob
+
+import pandas as pd
 
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
-CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
-SEASON = "2024-25"
+BASE_RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
+BASE_CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
+DEFAULT_SEASON = "2024-25"
+
+
+def get_season_raw_dir(season):
+    """Get the raw data directory for a specific season."""
+    return os.path.join(BASE_RAW_DIR, season)
+
+
+def get_season_clean_dir(season):
+    """Get the clean data directory for a specific season."""
+    return os.path.join(BASE_CLEAN_DIR, season)
+
+
+def get_shared_raw_dir():
+    """Get the shared raw data directory."""
+    return os.path.join(BASE_RAW_DIR, "shared")
+
+
+def get_shared_clean_dir():
+    """Get the shared clean data directory."""
+    return os.path.join(BASE_CLEAN_DIR, "shared")
 
 
 def ensure_dir(path):
@@ -28,9 +54,8 @@ def load_json(filepath):
         return json.load(f)
 
 
-def save_csv(df, filename):
-    """Save DataFrame to CSV in clean directory."""
-    filepath = os.path.join(CLEAN_DIR, filename)
+def save_csv(df, filepath):
+    """Save DataFrame to CSV."""
     df.to_csv(filepath, index=False)
     print(f"  Saved: {filepath} ({len(df)} rows)")
 
@@ -38,7 +63,11 @@ def save_csv(df, filename):
 def transform_teams():
     """Transform teams.json to teams.csv."""
     print("\n=== Transforming Teams ===")
-    filepath = os.path.join(RAW_DIR, "teams.json")
+    shared_raw = get_shared_raw_dir()
+    shared_clean = get_shared_clean_dir()
+    ensure_dir(shared_clean)
+
+    filepath = os.path.join(shared_raw, "teams.json")
 
     if not os.path.exists(filepath):
         print("  Skipping: teams.json not found")
@@ -46,13 +75,17 @@ def transform_teams():
 
     teams = load_json(filepath)
     df = pd.DataFrame(teams)
-    save_csv(df, "teams.csv")
+    save_csv(df, os.path.join(shared_clean, "teams.csv"))
 
 
 def transform_players():
     """Transform players.json to players.csv."""
     print("\n=== Transforming Players ===")
-    filepath = os.path.join(RAW_DIR, "players.json")
+    shared_raw = get_shared_raw_dir()
+    shared_clean = get_shared_clean_dir()
+    ensure_dir(shared_clean)
+
+    filepath = os.path.join(shared_raw, "players.json")
 
     if not os.path.exists(filepath):
         print("  Skipping: players.json not found")
@@ -72,14 +105,20 @@ def transform_players():
         df = pd.DataFrame(rows, columns=headers)
 
         # Map CommonAllPlayers columns to expected output format
-        df = df.rename(columns={
-            "PERSON_ID": "id",
-            "DISPLAY_FIRST_LAST": "full_name",
-        })
+        df = df.rename(
+            columns={
+                "PERSON_ID": "id",
+                "DISPLAY_FIRST_LAST": "full_name",
+            }
+        )
 
         # Extract first/last name from DISPLAY_FIRST_LAST
-        df["first_name"] = df["full_name"].apply(lambda x: x.split(" ")[0] if isinstance(x, str) else "")
-        df["last_name"] = df["full_name"].apply(lambda x: " ".join(x.split(" ")[1:]) if isinstance(x, str) else "")
+        df["first_name"] = df["full_name"].apply(
+            lambda x: x.split(" ")[0] if isinstance(x, str) else ""
+        )
+        df["last_name"] = df["full_name"].apply(
+            lambda x: " ".join(x.split(" ")[1:]) if isinstance(x, str) else ""
+        )
 
         # ROSTERSTATUS: 1 = active, 0 = inactive
         df["is_active"] = df["ROSTERSTATUS"].apply(lambda x: x == 1)
@@ -87,15 +126,19 @@ def transform_players():
         # Select only needed columns
         df = df[["id", "full_name", "first_name", "last_name", "is_active"]]
 
-    save_csv(df, "players.csv")
+    save_csv(df, os.path.join(shared_clean, "players.csv"))
 
 
-def transform_box_scores():
+def transform_box_scores(season):
     """Transform BoxScoreTraditionalV3 and BoxScoreAdvancedV3 into games, player_box_scores, and team_box_scores CSVs."""
     print("\n=== Transforming Box Scores ===")
 
-    trad_dir = os.path.join(RAW_DIR, "BoxScoreTraditionalV3")
-    adv_dir = os.path.join(RAW_DIR, "BoxScoreAdvancedV3")
+    season_raw = get_season_raw_dir(season)
+    season_clean = get_season_clean_dir(season)
+    ensure_dir(season_clean)
+
+    trad_dir = os.path.join(season_raw, "BoxScoreTraditionalV3")
+    adv_dir = os.path.join(season_raw, "BoxScoreAdvancedV3")
 
     trad_files = glob(os.path.join(trad_dir, "*.json"))
 
@@ -132,18 +175,18 @@ def transform_box_scores():
     # Save CSVs
     if games:
         df_games = pd.DataFrame(games)
-        df_games["season"] = SEASON
-        save_csv(df_games, "games.csv")
+        df_games["season"] = season
+        save_csv(df_games, os.path.join(season_clean, "games.csv"))
 
     if player_stats:
         df_players = pd.DataFrame(player_stats)
-        df_players["season"] = SEASON
-        save_csv(df_players, "player_box_scores.csv")
+        df_players["season"] = season
+        save_csv(df_players, os.path.join(season_clean, "player_box_scores.csv"))
 
     if team_stats:
         df_teams = pd.DataFrame(team_stats)
-        df_teams["season"] = SEASON
-        save_csv(df_teams, "team_box_scores.csv")
+        df_teams["season"] = season
+        save_csv(df_teams, os.path.join(season_clean, "team_box_scores.csv"))
 
 
 def extract_game_info(game_id, trad_data):
@@ -245,18 +288,20 @@ def extract_player_stats(game_id, trad_data, adv_data):
                 # Merge advanced stats if available
                 if player_id in adv_lookup:
                     adv_stats = adv_lookup[player_id]
-                    row.update({
-                        "offensive_rating": adv_stats.get("offensiveRating"),
-                        "defensive_rating": adv_stats.get("defensiveRating"),
-                        "net_rating": adv_stats.get("netRating"),
-                        "ast_pct": adv_stats.get("assistPercentage"),
-                        "ast_ratio": adv_stats.get("assistRatio"),
-                        "reb_pct": adv_stats.get("reboundPercentage"),
-                        "ts_pct": adv_stats.get("trueShootingPercentage"),
-                        "usg_pct": adv_stats.get("usagePercentage"),
-                        "pace": adv_stats.get("pace"),
-                        "pie": adv_stats.get("pie"),
-                    })
+                    row.update(
+                        {
+                            "offensive_rating": adv_stats.get("offensiveRating"),
+                            "defensive_rating": adv_stats.get("defensiveRating"),
+                            "net_rating": adv_stats.get("netRating"),
+                            "ast_pct": adv_stats.get("assistPercentage"),
+                            "ast_ratio": adv_stats.get("assistRatio"),
+                            "reb_pct": adv_stats.get("reboundPercentage"),
+                            "ts_pct": adv_stats.get("trueShootingPercentage"),
+                            "usg_pct": adv_stats.get("usagePercentage"),
+                            "pace": adv_stats.get("pace"),
+                            "pie": adv_stats.get("pie"),
+                        }
+                    )
 
                 rows.append(row)
 
@@ -321,13 +366,15 @@ def extract_team_stats(game_id, trad_data, adv_data):
             # Merge advanced stats if available
             if team_id in adv_lookup:
                 adv_stats = adv_lookup[team_id]
-                row.update({
-                    "offensive_rating": adv_stats.get("offensiveRating"),
-                    "defensive_rating": adv_stats.get("defensiveRating"),
-                    "net_rating": adv_stats.get("netRating"),
-                    "pace": adv_stats.get("pace"),
-                    "pie": adv_stats.get("pie"),
-                })
+                row.update(
+                    {
+                        "offensive_rating": adv_stats.get("offensiveRating"),
+                        "defensive_rating": adv_stats.get("defensiveRating"),
+                        "net_rating": adv_stats.get("netRating"),
+                        "pace": adv_stats.get("pace"),
+                        "pie": adv_stats.get("pie"),
+                    }
+                )
 
             rows.append(row)
 
@@ -337,11 +384,15 @@ def extract_team_stats(game_id, trad_data, adv_data):
     return rows
 
 
-def transform_shots():
+def transform_shots(season):
     """Transform ShotChartDetail files into shots.csv."""
     print("\n=== Transforming Shot Charts ===")
 
-    shot_dir = os.path.join(RAW_DIR, "ShotChartDetail")
+    season_raw = get_season_raw_dir(season)
+    season_clean = get_season_clean_dir(season)
+    ensure_dir(season_clean)
+
+    shot_dir = os.path.join(season_raw, "ShotChartDetail")
     shot_files = glob(os.path.join(shot_dir, "*.json"))
 
     if not shot_files:
@@ -364,34 +415,61 @@ def transform_shots():
                 rows = result_set.get("rowSet", [])
 
                 for row in rows:
-                    shot = dict(zip(headers, row))
+                    shot = dict(zip(headers, row, strict=False))
                     all_shots.append(shot)
 
     if all_shots:
         df = pd.DataFrame(all_shots)
-        df["season"] = SEASON
+        df["season"] = season
         # Rename columns to snake_case
         df.columns = [c.lower() for c in df.columns]
-        save_csv(df, "shots.csv")
+        save_csv(df, os.path.join(season_clean, "shots.csv"))
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Transform raw NBA data into clean CSVs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    python transform.py                    # Transform current season (2024-25)
+    python transform.py --season 2023-24   # Transform 2023-24 season
+        """,
+    )
+    parser.add_argument(
+        "--season",
+        default=DEFAULT_SEASON,
+        help=f"Season to transform (default: {DEFAULT_SEASON})",
+    )
+    return parser.parse_args()
 
 
 def main():
+    args = parse_args()
+    season = args.season
+
+    season_raw = get_season_raw_dir(season)
+    season_clean = get_season_clean_dir(season)
+
     print("=" * 50)
     print("NBA Data Transform Script")
-    print(f"Raw Directory: {RAW_DIR}")
-    print(f"Clean Directory: {CLEAN_DIR}")
+    print(f"Season: {season}")
+    print(f"Raw Directory: {season_raw}")
+    print(f"Clean Directory: {season_clean}")
     print("=" * 50)
 
-    # Create clean directory
-    ensure_dir(CLEAN_DIR)
+    # Create clean directories
+    ensure_dir(season_clean)
+    ensure_dir(get_shared_clean_dir())
 
-    # Transform dimension tables
+    # Transform shared dimension tables (teams, players)
     transform_teams()
     transform_players()
 
-    # Transform fact tables
-    transform_box_scores()
-    transform_shots()
+    # Transform season-specific fact tables
+    transform_box_scores(season)
+    transform_shots(season)
 
     print("\n" + "=" * 50)
     print("Transform complete!")

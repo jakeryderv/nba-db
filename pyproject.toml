@@ -6,7 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "basketball-reference-web-scraper>=4.15.4",
-    "flask>=3.1.2",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
     "nba-api>=1.11.3",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
@@ -14,3 +15,39 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pandas-stubs>=2.2.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true

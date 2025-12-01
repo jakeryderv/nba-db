@@ -2,19 +2,26 @@
 """
 NBA Data Load Script
 Loads cleaned CSV data into PostgreSQL database.
+
+Usage:
+    python load.py                    # Default season (2024-25)
+    python load.py --season 2023-24   # Specific season
 """
 
+import argparse
 import os
 import sys
+
 import pandas as pd
 import psycopg2
-from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+from psycopg2.extras import execute_values
 
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
+BASE_CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
+DEFAULT_SEASON = "2024-25"
 
 # Load environment variables
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -28,42 +35,52 @@ DB_CONFIG = {
 }
 
 
+def get_season_clean_dir(season):
+    """Get the clean data directory for a specific season."""
+    return os.path.join(BASE_CLEAN_DIR, season)
+
+
+def get_shared_clean_dir():
+    """Get the shared clean data directory."""
+    return os.path.join(BASE_CLEAN_DIR, "shared")
+
+
 def get_connection():
     """Create database connection."""
     return psycopg2.connect(**DB_CONFIG)
 
 
-def load_csv(filename):
-    """Load CSV file from clean directory."""
-    filepath = os.path.join(CLEAN_DIR, filename)
+def load_csv(filepath):
+    """Load CSV file."""
     if not os.path.exists(filepath):
-        print(f"  Skipping: {filename} not found")
+        print(f"  Skipping: {filepath} not found")
         return None
     return pd.read_csv(filepath)
 
 
-def truncate_tables(conn):
-    """Truncate all tables in reverse dependency order."""
-    print("\n=== Truncating Tables ===")
-    tables = [
+def delete_season_data(conn, season):
+    """Delete all data for a specific season (reverse dependency order)."""
+    print(f"\n=== Deleting Existing Data for Season {season} ===")
+
+    # Tables with season column (fact tables)
+    season_tables = [
         "shots",
         "player_game_stats",
         "team_game_stats",
         "games",
-        "players",
-        "teams",
     ]
+
     with conn.cursor() as cur:
-        for table in tables:
-            cur.execute(f"TRUNCATE TABLE {table} CASCADE")
-            print(f"  Truncated: {table}")
-    conn.commit()
+        for table in season_tables:
+            cur.execute(f"DELETE FROM {table} WHERE season = %s", (season,))
+            print(f"  Deleted from {table}: {cur.rowcount} rows")
 
 
 def load_teams(conn):
-    """Load teams data."""
+    """Load teams data (shared across seasons)."""
     print("\n=== Loading Teams ===")
-    df = load_csv("teams.csv")
+    filepath = os.path.join(get_shared_clean_dir(), "teams.csv")
+    df = load_csv(filepath)
     if df is None:
         return 0
 
@@ -81,15 +98,15 @@ def load_teams(conn):
             """,
             values,
         )
-    conn.commit()
     print(f"  Loaded: {len(df)} teams")
     return len(df)
 
 
 def load_players(conn):
-    """Load players data."""
+    """Load players data (shared across seasons)."""
     print("\n=== Loading Players ===")
-    df = load_csv("players.csv")
+    filepath = os.path.join(get_shared_clean_dir(), "players.csv")
+    df = load_csv(filepath)
     if df is None:
         return 0
 
@@ -110,22 +127,30 @@ def load_players(conn):
             """,
             values,
         )
-    conn.commit()
     print(f"  Loaded: {len(df)} players")
     return len(df)
 
 
-def backfill_missing_players(conn):
+def backfill_missing_players(conn, season):
     """Insert placeholder records for players in box scores but not in players table."""
     print("\n=== Backfilling Missing Players ===")
 
-    players_df = load_csv("players.csv")
-    box_scores_df = load_csv("player_box_scores.csv")
+    season_dir = get_season_clean_dir(season)
+    shared_dir = get_shared_clean_dir()
+
+    players_df = load_csv(os.path.join(shared_dir, "players.csv"))
+    box_scores_df = load_csv(os.path.join(season_dir, "player_box_scores.csv"))
 
     if players_df is None or box_scores_df is None:
         return 0
 
-    existing_ids = set(players_df["id"])
+    # Also check existing players in database
+    with get_connection() as check_conn:
+        with check_conn.cursor() as cur:
+            cur.execute("SELECT id FROM players")
+            db_player_ids = {row[0] for row in cur.fetchall()}
+
+    existing_ids = set(players_df["id"]) | db_player_ids
     box_score_ids = set(box_scores_df["player_id"])
     missing_ids = box_score_ids - existing_ids
 
@@ -137,7 +162,11 @@ def backfill_missing_players(conn):
     missing_players = []
     for player_id in missing_ids:
         rows = box_scores_df[box_scores_df["player_id"] == player_id]
-        name = rows["name"].dropna().iloc[0] if not rows["name"].dropna().empty else f"Unknown Player {player_id}"
+        name = (
+            rows["name"].dropna().iloc[0]
+            if not rows["name"].dropna().empty
+            else f"Unknown Player {player_id}"
+        )
         parts = name.split(" ", 1) if isinstance(name, str) else ["Unknown", str(player_id)]
         first_name = parts[0] if parts else "Unknown"
         last_name = parts[1] if len(parts) > 1 else ""
@@ -153,15 +182,15 @@ def backfill_missing_players(conn):
             """,
             missing_players,
         )
-    conn.commit()
     print(f"  Backfilled: {len(missing_players)} missing players")
     return len(missing_players)
 
 
-def load_games(conn):
-    """Load games data."""
+def load_games(conn, season):
+    """Load games data for a specific season."""
     print("\n=== Loading Games ===")
-    df = load_csv("games.csv")
+    filepath = os.path.join(get_season_clean_dir(season), "games.csv")
+    df = load_csv(filepath)
     if df is None:
         return 0
 
@@ -183,7 +212,6 @@ def load_games(conn):
             """,
             values,
         )
-    conn.commit()
     print(f"  Loaded: {len(df)} games")
     return len(df)
 
@@ -202,10 +230,11 @@ def parse_minutes(minutes_str):
         return None
 
 
-def load_player_game_stats(conn):
-    """Load player game statistics."""
+def load_player_game_stats(conn, season):
+    """Load player game statistics for a specific season."""
     print("\n=== Loading Player Game Stats ===")
-    df = load_csv("player_box_scores.csv")
+    filepath = os.path.join(get_season_clean_dir(season), "player_box_scores.csv")
+    df = load_csv(filepath)
     if df is None:
         return 0
 
@@ -219,14 +248,42 @@ def load_player_game_stats(conn):
     df = df.where(pd.notna(df), None)
 
     columns = [
-        "game_id", "player_id", "team_id", "position", "starter", "minutes",
-        "points", "rebounds", "offensive_rebounds", "defensive_rebounds",
-        "assists", "steals", "blocks", "turnovers", "personal_fouls",
-        "fgm", "fga", "fg_pct", "fg3m", "fg3a", "fg3_pct",
-        "ftm", "fta", "ft_pct", "plus_minus",
-        "offensive_rating", "defensive_rating", "net_rating",
-        "ast_pct", "ast_ratio", "reb_pct", "ts_pct", "usg_pct", "pace", "pie",
-        "season"
+        "game_id",
+        "player_id",
+        "team_id",
+        "position",
+        "starter",
+        "minutes",
+        "points",
+        "rebounds",
+        "offensive_rebounds",
+        "defensive_rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+        "personal_fouls",
+        "fgm",
+        "fga",
+        "fg_pct",
+        "fg3m",
+        "fg3a",
+        "fg3_pct",
+        "ftm",
+        "fta",
+        "ft_pct",
+        "plus_minus",
+        "offensive_rating",
+        "defensive_rating",
+        "net_rating",
+        "ast_pct",
+        "ast_ratio",
+        "reb_pct",
+        "ts_pct",
+        "usg_pct",
+        "pace",
+        "pie",
+        "season",
     ]
 
     # Ensure all columns exist
@@ -257,15 +314,15 @@ def load_player_game_stats(conn):
             values,
             page_size=1000,
         )
-    conn.commit()
     print(f"  Loaded: {len(df)} player game stats")
     return len(df)
 
 
-def load_team_game_stats(conn):
-    """Load team game statistics."""
+def load_team_game_stats(conn, season):
+    """Load team game statistics for a specific season."""
     print("\n=== Loading Team Game Stats ===")
-    df = load_csv("team_box_scores.csv")
+    filepath = os.path.join(get_season_clean_dir(season), "team_box_scores.csv")
+    df = load_csv(filepath)
     if df is None:
         return 0
 
@@ -276,13 +333,33 @@ def load_team_game_stats(conn):
     df = df.where(pd.notna(df), None)
 
     columns = [
-        "game_id", "team_id", "is_home",
-        "points", "rebounds", "offensive_rebounds", "defensive_rebounds",
-        "assists", "steals", "blocks", "turnovers", "personal_fouls",
-        "fgm", "fga", "fg_pct", "fg3m", "fg3a", "fg3_pct",
-        "ftm", "fta", "ft_pct",
-        "offensive_rating", "defensive_rating", "net_rating", "pace", "pie",
-        "season"
+        "game_id",
+        "team_id",
+        "is_home",
+        "points",
+        "rebounds",
+        "offensive_rebounds",
+        "defensive_rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+        "personal_fouls",
+        "fgm",
+        "fga",
+        "fg_pct",
+        "fg3m",
+        "fg3a",
+        "fg3_pct",
+        "ftm",
+        "fta",
+        "ft_pct",
+        "offensive_rating",
+        "defensive_rating",
+        "net_rating",
+        "pace",
+        "pie",
+        "season",
     ]
 
     # Ensure all columns exist
@@ -311,15 +388,15 @@ def load_team_game_stats(conn):
             """,
             values,
         )
-    conn.commit()
     print(f"  Loaded: {len(df)} team game stats")
     return len(df)
 
 
-def load_shots(conn):
-    """Load shot chart data."""
+def load_shots(conn, season):
+    """Load shot chart data for a specific season."""
     print("\n=== Loading Shots ===")
-    df = load_csv("shots.csv")
+    filepath = os.path.join(get_season_clean_dir(season), "shots.csv")
+    df = load_csv(filepath)
     if df is None:
         return 0
 
@@ -327,28 +404,30 @@ def load_shots(conn):
     df = df.where(pd.notna(df), None)
 
     # Map column names from CSV to database
-    df = df.rename(columns={
-        "game_id": "game_id",
-        "game_event_id": "game_event_id",
-        "player_id": "player_id",
-        "team_id": "team_id",
-        "period": "period",
-        "minutes_remaining": "minutes_remaining",
-        "seconds_remaining": "seconds_remaining",
-        "event_type": "event_type",
-        "action_type": "action_type",
-        "shot_type": "shot_type",
-        "shot_zone_basic": "shot_zone_basic",
-        "shot_zone_area": "shot_zone_area",
-        "shot_zone_range": "shot_zone_range",
-        "shot_distance": "shot_distance",
-        "loc_x": "loc_x",
-        "loc_y": "loc_y",
-        "shot_made_flag": "shot_made",
-        "game_date": "game_date",
-        "htm": "home_team",
-        "vtm": "away_team",
-    })
+    df = df.rename(
+        columns={
+            "game_id": "game_id",
+            "game_event_id": "game_event_id",
+            "player_id": "player_id",
+            "team_id": "team_id",
+            "period": "period",
+            "minutes_remaining": "minutes_remaining",
+            "seconds_remaining": "seconds_remaining",
+            "event_type": "event_type",
+            "action_type": "action_type",
+            "shot_type": "shot_type",
+            "shot_zone_basic": "shot_zone_basic",
+            "shot_zone_area": "shot_zone_area",
+            "shot_zone_range": "shot_zone_range",
+            "shot_distance": "shot_distance",
+            "loc_x": "loc_x",
+            "loc_y": "loc_y",
+            "shot_made_flag": "shot_made",
+            "game_date": "game_date",
+            "htm": "home_team",
+            "vtm": "away_team",
+        }
+    )
 
     # Convert shot_made to boolean
     df["shot_made"] = df["shot_made"].apply(lambda x: x == 1 if pd.notna(x) else None)
@@ -357,12 +436,27 @@ def load_shots(conn):
     df["game_date"] = pd.to_datetime(df["game_date"], format="%Y%m%d", errors="coerce").dt.date
 
     columns = [
-        "game_id", "game_event_id", "player_id", "team_id",
-        "period", "minutes_remaining", "seconds_remaining",
-        "event_type", "action_type", "shot_type",
-        "shot_zone_basic", "shot_zone_area", "shot_zone_range", "shot_distance",
-        "loc_x", "loc_y", "shot_made",
-        "game_date", "home_team", "away_team", "season"
+        "game_id",
+        "game_event_id",
+        "player_id",
+        "team_id",
+        "period",
+        "minutes_remaining",
+        "seconds_remaining",
+        "event_type",
+        "action_type",
+        "shot_type",
+        "shot_zone_basic",
+        "shot_zone_area",
+        "shot_zone_range",
+        "shot_distance",
+        "loc_x",
+        "loc_y",
+        "shot_made",
+        "game_date",
+        "home_team",
+        "away_team",
+        "season",
     ]
 
     # Ensure all columns exist
@@ -391,21 +485,84 @@ def load_shots(conn):
             values,
             page_size=1000,
         )
-    conn.commit()
     print(f"  Loaded: {len(df)} shots")
     return len(df)
 
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Load NBA data into PostgreSQL database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    python load.py                    # Load current season (2024-25)
+    python load.py --season 2023-24   # Load 2023-24 season
+        """,
+    )
+    parser.add_argument(
+        "--season",
+        default=DEFAULT_SEASON,
+        help=f"Season to load (default: {DEFAULT_SEASON})",
+    )
+    return parser.parse_args()
+
+
+def update_season_record(conn, season):
+    """Update or insert season record with counts."""
+    print("\n=== Updating Season Record ===")
+
+    # Parse season years
+    parts = season.split("-")
+    start_year = int(parts[0])
+    end_year = int(f"20{parts[1]}") if len(parts[1]) == 2 else int(parts[1])
+
+    with conn.cursor() as cur:
+        # Get counts for this season
+        cur.execute("SELECT COUNT(*) FROM games WHERE season = %s", (season,))
+        games_count = cur.fetchone()[0]
+
+        cur.execute(
+            "SELECT COUNT(DISTINCT player_id) FROM player_game_stats WHERE season = %s", (season,)
+        )
+        players_count = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM shots WHERE season = %s", (season,))
+        shots_count = cur.fetchone()[0]
+
+        # Upsert season record
+        cur.execute(
+            """
+            INSERT INTO seasons (id, start_year, end_year, games_count, players_count, shots_count, loaded_at)
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+                games_count = EXCLUDED.games_count,
+                players_count = EXCLUDED.players_count,
+                shots_count = EXCLUDED.shots_count,
+                loaded_at = CURRENT_TIMESTAMP
+        """,
+            (season, start_year, end_year, games_count, players_count, shots_count),
+        )
+
+    print(f"  Season {season}: {games_count} games, {players_count} players, {shots_count} shots")
+
+
 def main():
+    args = parse_args()
+    season = args.season
+    season_dir = get_season_clean_dir(season)
+
     print("=" * 50)
     print("NBA Data Load Script")
-    print(f"Clean Directory: {CLEAN_DIR}")
+    print(f"Season: {season}")
+    print(f"Clean Directory: {season_dir}")
     print(f"Database: {DB_CONFIG['dbname']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}")
     print("=" * 50)
 
     # Test connection
     try:
         conn = get_connection()
+        conn.autocommit = False  # Ensure we're in transaction mode
         print("\n  Connected to database successfully")
     except Exception as e:
         print(f"\n  Error connecting to database: {e}")
@@ -413,28 +570,36 @@ def main():
         sys.exit(1)
 
     try:
-        # Truncate existing data
-        truncate_tables(conn)
+        # All operations run in a single transaction for atomicity
+        # If interrupted, everything rolls back to previous state
 
-        # Load dimension tables first (no foreign key dependencies)
+        # Delete existing data for this season only
+        delete_season_data(conn, season)
+
+        # Load dimension tables (shared across seasons, use ON CONFLICT)
         load_teams(conn)
         load_players(conn)
-        backfill_missing_players(conn)
+        backfill_missing_players(conn, season)
 
-        # Load games (depends on teams)
-        load_games(conn)
+        # Load season-specific fact tables
+        load_games(conn, season)
+        load_player_game_stats(conn, season)
+        load_team_game_stats(conn, season)
+        load_shots(conn, season)
 
-        # Load fact tables (depend on dimension tables and games)
-        load_player_game_stats(conn)
-        load_team_game_stats(conn)
-        load_shots(conn)
+        # Update season tracking record
+        update_season_record(conn, season)
+
+        # Commit entire transaction
+        conn.commit()
 
         print("\n" + "=" * 50)
-        print("Load complete!")
+        print(f"Load complete for season {season}!")
         print("=" * 50)
 
     except Exception as e:
         print(f"\n  Error during load: {e}")
+        print("  Rolling back all changes...")
         conn.rollback()
         raise
     finally:
