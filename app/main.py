@@ -180,6 +180,7 @@ def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
 def list_games(
     season: str | None = Query(None, description="Filter by season"),
     team_id: int | None = Query(None, description="Filter by team"),
+    sort: str = Query("desc", description="Sort by date: 'asc' or 'desc'"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> GameList:
@@ -195,6 +196,7 @@ def list_games(
             params.extend([team_id, team_id])
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        order_dir = "ASC" if sort == "asc" else "DESC"
 
         cur.execute(f"SELECT COUNT(*) as count FROM games g {where_clause}", params)
         total = cur.fetchone()["count"]
@@ -206,7 +208,7 @@ def list_games(
             JOIN teams ht ON g.home_team_id = ht.id
             JOIN teams at ON g.away_team_id = at.id
             {where_clause}
-            ORDER BY g.game_date DESC, g.id DESC
+            ORDER BY g.game_date {order_dir}, g.id {order_dir}
             LIMIT %s OFFSET %s
             """,
             params + [limit, offset],

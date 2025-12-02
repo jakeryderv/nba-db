@@ -722,12 +722,6 @@
                     Players
                 </a>
             </li>
-            <li>
-                <a href="#teams" class="nav-link" data-section="teams">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                    Teams
-                </a>
-            </li>
         </ul>
     </nav>
 
@@ -767,6 +761,10 @@
                     <select id="games-team" class="filter-select">
                         <option value="">All Teams</option>
                     </select>
+                    <select id="games-sort" class="filter-select">
+                        <option value="desc">Newest First</option>
+                        <option value="asc">Oldest First</option>
+                    </select>
                 </div>
             </div>
             <div class="cards-grid" id="games-grid"></div>
@@ -795,15 +793,6 @@
             <div class="pagination" id="players-pagination"></div>
         </section>
 
-        <!-- Teams -->
-        <section id="teams" class="section">
-            <div class="section-header">
-                <h2 class="section-title">Teams</h2>
-            </div>
-            <div class="table-container">
-                <div class="table-scroll" id="teams-table"></div>
-            </div>
-        </section>
     </main>
 
     <!-- Player Modal -->
@@ -866,6 +855,7 @@
             };
             document.getElementById('player-active').onchange = loadPlayers;
             document.getElementById('games-team').onchange = loadGames;
+            document.getElementById('games-sort').onchange = loadGames;
             document.getElementById('leaders-stat').onchange = loadLeaders;
 
             document.querySelectorAll('.modal-overlay').forEach(m =>
@@ -892,7 +882,7 @@
 
         function loadSection(s) {
             s = s || document.querySelector('.nav-link.active').dataset.section;
-            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers, teams:loadTeams})[s]();
+            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers})[s]();
         }
 
         async function loadStandings() {
@@ -942,10 +932,11 @@
         async function loadGames(reset = true) {
             if (reset) page.games.o = 0;
             const team = document.getElementById('games-team').value;
+            const sort = document.getElementById('games-sort').value;
             const c = document.getElementById('games-grid');
             c.innerHTML = '<div class="loading">Loading games</div>';
             try {
-                const p = new URLSearchParams({season, limit: page.games.l, offset: page.games.o});
+                const p = new URLSearchParams({season, limit: page.games.l, offset: page.games.o, sort});
                 if (team) p.append('team_id', team);
                 const d = await api(`/api/games?${p}`);
                 page.games.t = d.total;
@@ -996,30 +987,6 @@
                 </table>`;
                 renderPagination('players');
             } catch(e) { c.innerHTML = `<div class="error">Error loading players: ${e.message}</div>`; }
-        }
-
-        async function loadTeams() {
-            const c = document.getElementById('teams-table');
-            c.innerHTML = '<div class="loading">Loading teams</div>';
-            try {
-                const standings = await api(`/api/standings?season=${season}`);
-                const standMap = Object.fromEntries(standings.map(s => [s.team_id, s]));
-                c.innerHTML = `<table>
-                    <thead><tr><th>Team</th><th>City</th><th>Founded</th><th>Record</th><th>Win%</th></tr></thead>
-                    <tbody>${teams.map(t => {
-                        const s = standMap[t.id];
-                        return `
-                            <tr>
-                                <td><span class="clickable" onclick="openTeam(${t.id})">${t.full_name}</span></td>
-                                <td>${t.city}, ${t.state}</td>
-                                <td class="num">${t.year_founded}</td>
-                                <td class="num" style="font-weight:600;">${s ? `${s.wins}-${s.losses}` : '-'}</td>
-                                <td class="num">${s ? (s.win_pct * 100).toFixed(1) + '%' : '-'}</td>
-                            </tr>
-                        `;
-                    }).join('')}</tbody>
-                </table>`;
-            } catch(e) { c.innerHTML = `<div class="error">Error loading teams: ${e.message}</div>`; }
         }
 
         function renderPagination(key) {
