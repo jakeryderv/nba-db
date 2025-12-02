@@ -1,0 +1,2 @@
+-- NBA Database Triggers
+-- (Simplified - no audit triggers needed)

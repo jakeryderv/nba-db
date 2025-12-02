@@ -1,22 +1,24 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: mysql:8.0
     container_name: nba_db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-nba_db}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      MYSQL_DATABASE: ${DB_NAME:-nba_db}
+      MYSQL_USER: ${DB_USER:-nba_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-nba_password}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-3306}:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
       - ./db/schema:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-nba_db}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-root_password}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    command: --default-authentication-plugin=mysql_native_password
 
 volumes:
-  postgres_data:
+  mysql_data:

@@ -4,31 +4,35 @@ import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
-import psycopg2
+import mysql.connector
+from mysql.connector import pooling
 from dotenv import load_dotenv
-from psycopg2.extras import RealDictCursor
-from psycopg2.pool import ThreadedConnectionPool
 
 # Load environment variables
 load_dotenv()
 
 DB_CONFIG = {
-    "dbname": os.getenv("DB_NAME", "nba_db"),
-    "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "postgres"),
+    "database": os.getenv("DB_NAME", "nba_db"),
+    "user": os.getenv("DB_USER", "nba_user"),
+    "password": os.getenv("DB_PASSWORD", "nba_password"),
     "host": os.getenv("DB_HOST", "localhost"),
-    "port": os.getenv("DB_PORT", "5432"),
+    "port": int(os.getenv("DB_PORT", "3306")),
 }
 
 # Connection pool (initialized lazily)
-_pool: ThreadedConnectionPool | None = None
+_pool: pooling.MySQLConnectionPool | None = None
 
 
-def get_pool() -> ThreadedConnectionPool:
+def get_pool() -> pooling.MySQLConnectionPool:
     """Get or create the connection pool."""
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(minconn=1, maxconn=10, **DB_CONFIG)
+        _pool = pooling.MySQLConnectionPool(
+            pool_name="nba_pool",
+            pool_size=10,
+            pool_reset_session=True,
+            **DB_CONFIG
+        )
     return _pool
 
 
@@ -36,24 +40,28 @@ def close_pool() -> None:
     """Close the connection pool."""
     global _pool
     if _pool is not None:
-        _pool.closeall()
+        # MySQL connector pool doesn't have a closeall method
+        # Connections are closed when they go out of scope
         _pool = None
 
 
 @contextmanager
-def get_db() -> Generator[psycopg2.extensions.connection, None, None]:
+def get_db() -> Generator[mysql.connector.MySQLConnection, None, None]:
     """Get a database connection from the pool."""
     pool = get_pool()
-    conn = pool.getconn()
+    conn = pool.get_connection()
     try:
         yield conn
     finally:
-        pool.putconn(conn)
+        conn.close()
 
 
 @contextmanager
-def get_cursor() -> Generator[RealDictCursor, None, None]:
+def get_cursor() -> Generator[mysql.connector.cursor.MySQLCursorDict, None, None]:
     """Get a database cursor that returns dicts."""
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur = conn.cursor(dictionary=True)
+        try:
             yield cur
+        finally:
+            cur.close()

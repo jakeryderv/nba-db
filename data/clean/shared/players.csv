@@ -415,7 +415,7 @@ id,full_name,first_name,last_name,is_active
 1630195,Leandro Bolmaro,Leandro,Bolmaro,False
 1627762,Joel Bolomboy,Joel,Bolomboy,False
 76197,Doug Bolstorff,Doug,Bolstorff,False
-76203,George H. Bon Salle,George,H. Bon Salle,False
+76203,George H. Bon Salle,George H.,Bon Salle,False
 1641737,Adem Bona,Adem,Bona,True
 76198,Phil Bond,Phil,Bond,False
 1603,Walter Bond,Walter,Bond,False
@@ -714,7 +714,7 @@ id,full_name,first_name,last_name,is_active
 76352,Bob Carrington,Bob,Carrington,False
 1642267,Bub Carrington,Bub,Carrington,True
 201960,DeMarre Carroll,DeMarre,Carroll,False
-76353,Joe Barry Carroll,Joe,Barry Carroll,False
+76353,Joe Barry Carroll,Joe Barry,Carroll,False
 2679,Matt Carroll,Matt,Carroll,False
 1131,Jimmy Carruth,Jimmy,Carruth,False
 1853,Anthony Carter,Anthony,Carter,False
@@ -1027,7 +1027,7 @@ id,full_name,first_name,last_name,is_active
 76519,Charlie Davis,Charlie,Davis,False
 905,Dale Davis,Dale,Davis,False
 1627738,Deyonta Davis,Deyonta,Davis,False
-76521,Double D Davis,Double,D Davis,False
+76521,Double D Davis,Double D,Davis,False
 202334,Ed Davis,Ed,Davis,False
 76522,Edward Davis,Edward,Davis,False
 1023,Emanual Davis,Emanual,Davis,False
@@ -1503,7 +1503,7 @@ id,full_name,first_name,last_name,is_active
 202070,Tony Gaffney,Tony,Gaffney,False
 1629655,Daniel Gafford,Daniel,Gafford,True
 101184,Deng Gai,Deng,Gai,False
-76769,Elmer R. Gainer,Elmer,R. Gainer,False
+76769,Elmer R. Gainer,Elmer R.,Gainer,False
 76770,Corey Gaines,Corey,Gaines,False
 2558,Reece Gaines,Reece,Gaines,False
 202178,Sundiata Gaines,Sundiata,Gaines,False
@@ -1910,7 +1910,7 @@ id,full_name,first_name,last_name,is_active
 202351,Lazar Hayward,Lazar,Hayward,False
 2217,Brendan Haywood,Brendan,Haywood,False
 76981,Spencer Haywood,Spencer,Haywood,False
-76982,John W. Hazen,John,W. Hazen,False
+76982,John W. Hazen,John W.,Hazen,False
 76983,Walt Hazzard,Walt,Hazzard,False
 101129,Luther Head,Luther,Head,False
 1049,Shane Heal,Shane,Heal,False
@@ -1978,7 +1978,7 @@ id,full_name,first_name,last_name,is_active
 77022,Johnny High,Johnny,High,False
 1629312,Haywood Highsmith,Haywood,Highsmith,True
 77023,Wayne Hightower,Wayne,Hightower,False
-2403,Nene,Nene,,False
+2403,Nene,,,False
 77024,Armond Hill,Armond,Hill,False
 77025,Cleo Hill,Cleo,Hill,False
 77026,Gary Hill,Gary,Hill,False
@@ -2327,7 +2327,7 @@ id,full_name,first_name,last_name,is_active
 1630637,Carlik Jones,Carlik,Jones,False
 279,Charles Jones,Charles,Jones,False
 77178,Charles Jones,Charles,Jones,False
-1869,Charles R. Jones,Charles,R. Jones,False
+1869,Charles R. Jones,Charles R.,Jones,False
 1641732,Colby Jones,Colby,Jones,True
 1642938,Curtis Jones,Curtis,Jones,False
 2563,Dahntay Jones,Dahntay,Jones,False
@@ -2911,7 +2911,7 @@ id,full_name,first_name,last_name,is_active
 201601,Luc Mbah a Moute,Luc,Mbah a Moute,False
 2788,DJ Mbenga,DJ,Mbenga,False
 77498,Bob McAdoo,Bob,McAdoo,False
-203949,James Michael McAdoo,James,Michael McAdoo,False
+203949,James Michael McAdoo,James Michael,McAdoo,False
 77499,Ken McBride,Ken,McBride,False
 1630540,Miles McBride,Miles,McBride,True
 1642272,Jared McCain,Jared,McCain,True
@@ -2931,7 +2931,7 @@ id,full_name,first_name,last_name,is_active
 1043,Amal McCaskill,Amal,McCaskill,False
 1627775,Patrick McCaw,Patrick,McCaw,False
 77509,Dwayne McClain,Dwayne,McClain,False
-77510,"Ted, Hound Dog McClain","Ted,",Hound Dog McClain,False
+77510,"Ted, Hound Dog McClain","Ted, Hound Dog",McClain,False
 2082,Dan McClintock,Dan,McClintock,False
 77512,Jack McCloskey,Jack,McCloskey,False
 45,George McCloud,George,McCloud,False
@@ -3272,8 +3272,8 @@ id,full_name,first_name,last_name,is_active
 77691,Calvin Natt,Calvin,Natt,False
 77692,Kenny Natt,Kenny,Natt,False
 77693,Willie Naulls,Willie,Naulls,False
-2434,Juan Carlos Navarro,Juan,Carlos Navarro,False
-1642947,Eli John Ndiaye,Eli,John Ndiaye,False
+2434,Juan Carlos Navarro,Juan Carlos,Navarro,False
+1642947,Eli John Ndiaye,Eli John,Ndiaye,False
 202380,Hamady Ndiaye,Hamady,Ndiaye,False
 101238,Boniface Ndong,Boniface,Ndong,False
 1626254,Maurice Ndour,Maurice,Ndour,False
@@ -3316,7 +3316,7 @@ id,full_name,first_name,last_name,is_active
 203094,Andrew Nicholson,Andrew,Nicholson,False
 1093,Gaylon Nickerson,Gaylon,Nickerson,False
 77715,Carl Nicks,Carl,Nicks,False
-1642949,Yanic Konan Niederhäuser,Yanic,Konan Niederhäuser,False
+1642949,Yanic Konan Niederhäuser,Yanic Konan,Niederhäuser,False
 77716,Rich Niemann,Rich,Niemann,False
 77717,John Niemiera,John,Niemiera,False
 77718,Mike Niles,Mike,Niles,False
@@ -3494,7 +3494,7 @@ id,full_name,first_name,last_name,is_active
 1628394,Anžejs Pasečņiks,Anžejs,Pasečņiks,False
 1097,Zarko Paspalj,Zarko,Paspalj,False
 77806,Marty Passaglia,Marty,Passaglia,False
-77807,George A. Pastushok,George,A. Pastushok,False
+77807,George A. Pastushok,George A.,Pastushok,False
 77808,Myles Patrick,Myles,Patrick,False
 77809,Stan Patrick,Stan,Patrick,False
 1754,Andrae Patterson,Andrae,Patterson,False
@@ -3680,7 +3680,7 @@ id,full_name,first_name,last_name,is_active
 1642389,Zyon Pullin,Zyon,Pullin,True
 1628681,Rodney Purvis,Rodney,Purvis,False
 77891,Don Putman,Don,Putman,False
-1627753,Zhou Qi,Zhou,Qi,False
+1627753,Zhou Qi,,,False
 1627817,Tim Quarterman,Tim,Quarterman,False
 1642852,Derik Queen,Derik,Queen,False
 1630243,Trevelin Queen,Trevelin,Queen,True
@@ -3707,7 +3707,7 @@ id,full_name,first_name,last_name,is_active
 77904,Ed Rains,Ed,Rains,False
 2080,Igor Rakocevic,Igor,Rakocevic,False
 77905,Kurt Rambis,Kurt,Rambis,False
-2762,Peter John Ramos,Peter,John Ramos,False
+2762,Peter John Ramos,Peter John,Ramos,False
 77906,Cal Ramsey,Cal,Ramsey,False
 77907,Frank Ramsey,Frank,Ramsey,False
 1630186,Jahmi'us Ramsey,Jahmi'us,Ramsey,False
@@ -3794,7 +3794,7 @@ id,full_name,first_name,last_name,is_active
 200978,Jeremy Richardson,Jeremy,Richardson,False
 1626196,Josh Richardson,Josh,Richardson,False
 1627781,Malachi Richardson,Malachi,Richardson,False
-77952,Micheal Ray Richardson,Micheal,Ray Richardson,False
+77952,Micheal Ray Richardson,Micheal Ray,Richardson,False
 2369,Norman Richardson,Norman,Richardson,False
 71,Pooh Richardson,Pooh,Richardson,False
 2047,Quentin Richardson,Quentin,Richardson,False
@@ -3844,7 +3844,7 @@ id,full_name,first_name,last_name,is_active
 77984,Rick Robey,Rick,Robey,False
 2774,Bernard Robinson,Bernard,Robinson,False
 997,Chris Robinson,Chris,Robinson,False
-77986,Cliff T. Robinson,Cliff,T. Robinson,False
+77986,Cliff T. Robinson,Cliff T.,Robinson,False
 361,Clifford Robinson,Clifford,Robinson,False
 764,David Robinson,David,Robinson,False
 1628421,Devin Robinson,Devin,Robinson,False
@@ -4909,7 +4909,7 @@ id,full_name,first_name,last_name,is_active
 78549,Gus Williams,Gus,Williams,False
 78550,Guy Williams,Guy,Williams,False
 1006,Herb Williams,Herb,Williams,False
-73,Hot Rod Williams,Hot,Rod Williams,False
+73,Hot Rod Williams,Hot Rod,Williams,False
 1631114,Jalen Williams,Jalen,Williams,True
 1715,Jason Williams,Jason,Williams,False
 101214,Jawad Williams,Jawad,Williams,False
@@ -5053,14 +5053,14 @@ id,full_name,first_name,last_name,is_active
 203100,Tony Wroten,Tony,Wroten,False
 78627,A.J. Wynder,A.J.,Wynder,False
 1627824,Guerschon Yabusele,Guerschon,Yabusele,True
-1642905,Yang Hansen,Yang,Hansen,False
-2397,Yao Ming,Yao,Ming,False
+1642905,Yang Hansen,,,False
+2397,Yao Ming,,,False
 2428,Vincent Yarbrough,Vincent,Yarbrough,False
 78628,George Yardley,George,Yardley,False
 78629,Barry Yates,Barry,Yates,False
 78630,Wayne Yates,Wayne,Yates,False
 78631,Charlie Yelverton,Charlie,Yelverton,False
-201146,Yi Jianlian,Yi,Jianlian,False
+201146,Yi Jianlian,,,False
 78632,Rich Yonakor,Rich,Yonakor,False
 1628221,Gabe York,Gabe,York,False
 78633,Danny Young,Danny,Young,False

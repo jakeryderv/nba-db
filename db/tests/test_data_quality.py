@@ -7,7 +7,7 @@ Validates data integrity, completeness, and consistency.
 import os
 import sys
 
-import psycopg2
+import mysql.connector
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -16,11 +16,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 DB_CONFIG = {
-    "dbname": os.getenv("DB_NAME", "nba_db"),
-    "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "postgres"),
+    "database": os.getenv("DB_NAME", "nba_db"),
+    "user": os.getenv("DB_USER", "nba_user"),
+    "password": os.getenv("DB_PASSWORD", "nba_password"),
     "host": os.getenv("DB_HOST", "localhost"),
-    "port": os.getenv("DB_PORT", "5432"),
+    "port": int(os.getenv("DB_PORT", "3306")),
 }
 
 
@@ -33,7 +33,7 @@ class TestResult:
 
 def get_connection():
     """Create database connection."""
-    return psycopg2.connect(**DB_CONFIG)
+    return mysql.connector.connect(**DB_CONFIG)
 
 
 def run_query(conn, query):
@@ -297,10 +297,10 @@ def run_all_tests():
 
     try:
         conn = get_connection()
-        print(f"\nConnected to {DB_CONFIG['dbname']}@{DB_CONFIG['host']}\n")
+        print(f"\nConnected to {DB_CONFIG['database']}@{DB_CONFIG['host']}\n")
     except Exception as e:
         print(f"\nError connecting to database: {e}")
-        print("Make sure PostgreSQL is running and credentials are correct")
+        print("Make sure MySQL is running and credentials are correct")
         sys.exit(1)
 
     tests = [

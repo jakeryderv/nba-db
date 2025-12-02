@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Stats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #000000;
+            --bg-secondary: #0a0a0a;
+            --bg-tertiary: #141414;
+            --border: #262626;
+            --text: #f0f0f0;
+            --text-muted: #737373;
+            --accent: #3b82f6;
+            --accent-light: #60a5fa;
+            --accent-blue: #3b82f6;
+            --accent-green: #22c55e;
+            --accent-purple: #a855f7;
+            --accent-yellow: #eab308;
+            --gradient: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+        }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--gradient);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.1rem;
+        }
+        .logo-text {
+            font-weight: 700;
+            font-size: 1.25rem;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .season-selector {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .season-selector label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .season-selector select {
+            padding: 0.5rem 1rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .season-selector select:hover {
+            border-color: var(--accent);
+        }
+
+        /* Navigation */
+        nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+        nav ul {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+            list-style: none;
+            display: flex;
+            gap: 0.25rem;
+            overflow-x: auto;
+        }
+        nav a {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.875rem 1.25rem;
+            text-decoration: none;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.9rem;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        nav a:hover {
+            color: var(--text);
+            background: var(--bg-tertiary);
+        }
+        nav a.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        nav a svg {
+            width: 18px;
+            height: 18px;
+            opacity: 0.7;
+        }
+        nav a.active svg {
+            opacity: 1;
+        }
+
+        /* Main Content */
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+        .section {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        .section.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Section Header */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        .section-title span {
+            color: var(--text-muted);
+            font-weight: 400;
+            font-size: 1rem;
+            margin-left: 0.5rem;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .search-box {
+            position: relative;
+        }
+        .search-box svg {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 18px;
+            height: 18px;
+            color: var(--text-muted);
+        }
+        .search-box input {
+            padding: 0.6rem 0.75rem 0.6rem 2.5rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            width: 280px;
+            transition: all 0.2s;
+        }
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.1);
+        }
+        .filter-select {
+            padding: 0.6rem 1rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .filter-select:hover {
+            border-color: var(--accent);
+        }
+
+        /* Cards Grid */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1rem;
+        }
+
+        /* Stat Cards */
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: all 0.2s;
+        }
+        .stat-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        .stat-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+        .stat-card-rank {
+            width: 32px;
+            height: 32px;
+            background: var(--gradient);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+        .stat-card-rank.top3 {
+            background: var(--accent-yellow);
+            color: #000;
+        }
+        .stat-card-name {
+            font-weight: 600;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .stat-card-name:hover {
+            color: var(--accent);
+        }
+        .stat-card-team {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .stat-card-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-card-label {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Tables */
+        .table-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .table-scroll {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        th, td {
+            padding: 0.875rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            position: sticky;
+            top: 0;
+            white-space: nowrap;
+        }
+        tbody tr {
+            transition: background 0.2s;
+        }
+        tbody tr:hover {
+            background: var(--bg-tertiary);
+        }
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        td.num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .clickable {
+            cursor: pointer;
+            color: var(--accent-blue);
+            transition: color 0.2s;
+        }
+        .clickable:hover {
+            color: var(--accent);
+            text-decoration: underline;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge-active {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+        .badge-inactive {
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+        }
+        .badge-win {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+        .badge-loss {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+        }
+
+        /* Standings */
+        .standings-rank {
+            width: 28px;
+            height: 28px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .standings-rank.playoff {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+        .win-pct-bar {
+            width: 60px;
+            height: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+        .win-pct-bar-fill {
+            height: 100%;
+            background: var(--gradient);
+            border-radius: 3px;
+        }
+
+        /* Game Cards */
+        .game-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .game-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        .game-card-date {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+        .game-card-teams {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .game-team-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            border-radius: 6px;
+        }
+        .game-team-row.winner {
+            background: rgba(63, 185, 80, 0.1);
+        }
+        .game-team-name {
+            font-weight: 500;
+        }
+        .game-team-score {
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+        .game-team-row.winner .game-team-score {
+            color: var(--accent-green);
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+        }
+        .pagination button {
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pagination button:hover:not(:disabled) {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+        .pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .pagination-info {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            padding: 0 1rem;
+        }
+
+        /* Modals */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            max-width: 1000px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: modalIn 0.3s ease;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+        }
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+        .modal-close {
+            width: 36px;
+            height: 36px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-muted);
+            font-size: 1.25rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .modal-close:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .modal-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        /* Stats Display */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-box {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .stat-box-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .stat-box-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.25rem;
+        }
+
+        /* Game Modal Score */
+        .game-score-display {
+            text-align: center;
+            padding: 1.5rem;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+        .game-score-date {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .game-score-teams {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 2rem;
+        }
+        .game-score-team {
+            text-align: center;
+        }
+        .game-score-team-name {
+            font-size: 1rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .game-score-team-score {
+            font-size: 3rem;
+            font-weight: 800;
+        }
+        .game-score-team-score.winner {
+            color: var(--accent-green);
+        }
+        .game-score-vs {
+            font-size: 1.5rem;
+            color: var(--text-muted);
+            font-weight: 300;
+        }
+
+        /* Section subtitle */
+        .section-subtitle {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+        /* Loading & Error */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+            .section-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .search-box input {
+                width: 100%;
+            }
+            .controls {
+                width: 100%;
+            }
+            .cards-grid {
+                grid-template-columns: 1fr;
+            }
+            .game-score-teams {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            .game-score-vs {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">N</div>
+                <div class="logo-text">NBA Stats</div>
+            </div>
+            <div class="season-selector">
+                <label>Season:</label>
+                <select id="season-select"></select>
+            </div>
+        </div>
+    </header>
+
+    <nav>
+        <ul>
+            <li>
+                <a href="#standings" class="nav-link active" data-section="standings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                    Standings
+                </a>
+            </li>
+            <li>
+                <a href="#leaders" class="nav-link" data-section="leaders">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    Leaders
+                </a>
+            </li>
+            <li>
+                <a href="#games" class="nav-link" data-section="games">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    Games
+                </a>
+            </li>
+            <li>
+                <a href="#players" class="nav-link" data-section="players">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    Players
+                </a>
+            </li>
+            <li>
+                <a href="#teams" class="nav-link" data-section="teams">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    Teams
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <main>
+        <!-- Standings -->
+        <section id="standings" class="section active">
+            <div class="section-header">
+                <h2 class="section-title">Standings</h2>
+            </div>
+            <div class="table-container">
+                <div class="table-scroll" id="standings-table"></div>
+            </div>
+        </section>
+
+        <!-- Leaders -->
+        <section id="leaders" class="section">
+            <div class="section-header">
+                <h2 class="section-title">League Leaders</h2>
+                <div class="controls">
+                    <select id="leaders-stat" class="filter-select">
+                        <option value="points">Points</option>
+                        <option value="rebounds">Rebounds</option>
+                        <option value="assists">Assists</option>
+                        <option value="steals">Steals</option>
+                        <option value="blocks">Blocks</option>
+                    </select>
+                </div>
+            </div>
+            <div class="cards-grid" id="leaders-grid"></div>
+        </section>
+
+        <!-- Games -->
+        <section id="games" class="section">
+            <div class="section-header">
+                <h2 class="section-title">Games <span id="games-info"></span></h2>
+                <div class="controls">
+                    <select id="games-team" class="filter-select">
+                        <option value="">All Teams</option>
+                    </select>
+                </div>
+            </div>
+            <div class="cards-grid" id="games-grid"></div>
+            <div class="pagination" id="games-pagination"></div>
+        </section>
+
+        <!-- Players -->
+        <section id="players" class="section">
+            <div class="section-header">
+                <h2 class="section-title">Players <span id="players-info"></span></h2>
+                <div class="controls">
+                    <div class="search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                        <input type="text" id="player-search" placeholder="Search players...">
+                    </div>
+                    <select id="player-active" class="filter-select">
+                        <option value="">All Players</option>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-container">
+                <div class="table-scroll" id="players-table"></div>
+            </div>
+            <div class="pagination" id="players-pagination"></div>
+        </section>
+
+        <!-- Teams -->
+        <section id="teams" class="section">
+            <div class="section-header">
+                <h2 class="section-title">Teams</h2>
+            </div>
+            <div class="table-container">
+                <div class="table-scroll" id="teams-table"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Player Modal -->
+    <div class="modal-overlay" id="player-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="player-modal-title"></span>
+                <button class="modal-close" onclick="closeModal('player-modal')">&times;</button>
+            </div>
+            <div class="modal-body" id="player-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Game Modal -->
+    <div class="modal-overlay" id="game-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="game-modal-title"></span>
+                <button class="modal-close" onclick="closeModal('game-modal')">&times;</button>
+            </div>
+            <div class="modal-body" id="game-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Team Modal -->
+    <div class="modal-overlay" id="team-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="team-modal-title"></span>
+                <button class="modal-close" onclick="closeModal('team-modal')">&times;</button>
+            </div>
+            <div class="modal-body" id="team-modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        let season = '2024-25', teams = [];
+        const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const seasons = await api('/api/seasons');
+            if (seasons.length) season = seasons[0].id;
+            document.getElementById('season-select').innerHTML = seasons.map(s =>
+                `<option value="${s.id}"${s.id===season?' selected':''}>${s.id}</option>`
+            ).join('');
+            document.getElementById('season-select').onchange = e => { season = e.target.value; loadSection(); };
+
+            teams = await api('/api/teams');
+            document.getElementById('games-team').innerHTML = '<option value="">All Teams</option>' +
+                teams.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('');
+
+            document.querySelectorAll('.nav-link').forEach(a =>
+                a.onclick = e => { e.preventDefault(); switchTo(a.dataset.section); }
+            );
+
+            let searchTimeout;
+            document.getElementById('player-search').oninput = () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(loadPlayers, 300);
+            };
+            document.getElementById('player-active').onchange = loadPlayers;
+            document.getElementById('games-team').onchange = loadGames;
+            document.getElementById('leaders-stat').onchange = loadLeaders;
+
+            document.querySelectorAll('.modal-overlay').forEach(m =>
+                m.onclick = e => { if(e.target === m) m.classList.remove('active'); }
+            );
+            document.onkeydown = e => {
+                if(e.key === 'Escape') document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+            };
+
+            loadStandings();
+        });
+
+        async function api(url) {
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+
+        function switchTo(s) {
+            document.querySelectorAll('.nav-link').forEach(a => a.classList.toggle('active', a.dataset.section === s));
+            document.querySelectorAll('.section').forEach(sec => sec.classList.toggle('active', sec.id === s));
+            loadSection(s);
+        }
+
+        function loadSection(s) {
+            s = s || document.querySelector('.nav-link.active').dataset.section;
+            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers, teams:loadTeams})[s]();
+        }
+
+        async function loadStandings() {
+            const c = document.getElementById('standings-table');
+            c.innerHTML = '<div class="loading">Loading standings</div>';
+            try {
+                const d = await api(`/api/standings?season=${season}`);
+                c.innerHTML = `<table>
+                    <thead><tr><th style="width:50px">#</th><th>Team</th><th>W</th><th>L</th><th>PCT</th><th style="width:120px"></th></tr></thead>
+                    <tbody>${d.map((t, i) => `
+                        <tr>
+                            <td><span class="standings-rank ${i < 10 ? 'playoff' : ''}">${i + 1}</span></td>
+                            <td><span class="clickable" onclick="openTeam(${t.team_id})">${t.team_name}</span></td>
+                            <td class="num" style="color: var(--accent-green); font-weight: 600;">${t.wins}</td>
+                            <td class="num">${t.losses}</td>
+                            <td class="num" style="font-weight: 600;">${(t.win_pct * 100).toFixed(1)}%</td>
+                            <td><div class="win-pct-bar"><div class="win-pct-bar-fill" style="width:${t.win_pct * 100}%"></div></div></td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>`;
+            } catch(e) { c.innerHTML = `<div class="error">Error loading standings: ${e.message}</div>`; }
+        }
+
+        async function loadLeaders() {
+            const stat = document.getElementById('leaders-stat').value;
+            const statLabels = {points:'PPG', rebounds:'RPG', assists:'APG', steals:'SPG', blocks:'BPG'};
+            const c = document.getElementById('leaders-grid');
+            c.innerHTML = '<div class="loading">Loading leaders</div>';
+            try {
+                const d = await api(`/api/leaders/${stat}?season=${season}&limit=12`);
+                c.innerHTML = d.data.map(p => `
+                    <div class="stat-card">
+                        <div class="stat-card-header">
+                            <div>
+                                <div class="stat-card-name" onclick="openPlayer(${p.player_id})">${p.player_name}</div>
+                                <div class="stat-card-team">${p.team_abbr} &middot; ${p.games_played} GP</div>
+                            </div>
+                            <div class="stat-card-rank ${p.rank <= 3 ? 'top3' : ''}">${p.rank}</div>
+                        </div>
+                        <div class="stat-card-value">${p.value}</div>
+                        <div class="stat-card-label">${statLabels[stat]}</div>
+                    </div>
+                `).join('');
+            } catch(e) { c.innerHTML = `<div class="error">Error loading leaders: ${e.message}</div>`; }
+        }
+
+        async function loadGames(reset = true) {
+            if (reset) page.games.o = 0;
+            const team = document.getElementById('games-team').value;
+            const c = document.getElementById('games-grid');
+            c.innerHTML = '<div class="loading">Loading games</div>';
+            try {
+                const p = new URLSearchParams({season, limit: page.games.l, offset: page.games.o});
+                if (team) p.append('team_id', team);
+                const d = await api(`/api/games?${p}`);
+                page.games.t = d.total;
+                document.getElementById('games-info').textContent = `(${d.total} total)`;
+                c.innerHTML = d.data.map(g => {
+                    const homeWin = g.home_score > g.away_score;
+                    return `
+                        <div class="game-card" onclick="openGame('${g.id}')">
+                            <div class="game-card-date">${g.game_date || 'TBD'}</div>
+                            <div class="game-card-teams">
+                                <div class="game-team-row ${!homeWin ? 'winner' : ''}">
+                                    <span class="game-team-name">${g.away_team}</span>
+                                    <span class="game-team-score">${g.away_score}</span>
+                                </div>
+                                <div class="game-team-row ${homeWin ? 'winner' : ''}">
+                                    <span class="game-team-name">@ ${g.home_team}</span>
+                                    <span class="game-team-score">${g.home_score}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                renderPagination('games');
+            } catch(e) { c.innerHTML = `<div class="error">Error loading games: ${e.message}</div>`; }
+        }
+
+        async function loadPlayers(reset = true) {
+            if (reset) page.players.o = 0;
+            const search = document.getElementById('player-search').value;
+            const active = document.getElementById('player-active').value;
+            const c = document.getElementById('players-table');
+            c.innerHTML = '<div class="loading">Loading players</div>';
+            try {
+                const p = new URLSearchParams({limit: page.players.l, offset: page.players.o});
+                if (search) p.append('search', search);
+                if (active) p.append('active', active);
+                const d = await api(`/api/players?${p}`);
+                page.players.t = d.total;
+                document.getElementById('players-info').textContent = `(${d.total} total)`;
+                c.innerHTML = `<table>
+                    <thead><tr><th>Player</th><th>Status</th></tr></thead>
+                    <tbody>${d.data.map(p => `
+                        <tr>
+                            <td><span class="clickable" onclick="openPlayer(${p.id})">${p.full_name}</span></td>
+                            <td><span class="badge badge-${p.is_active ? 'active' : 'inactive'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>`;
+                renderPagination('players');
+            } catch(e) { c.innerHTML = `<div class="error">Error loading players: ${e.message}</div>`; }
+        }
+
+        async function loadTeams() {
+            const c = document.getElementById('teams-table');
+            c.innerHTML = '<div class="loading">Loading teams</div>';
+            try {
+                const standings = await api(`/api/standings?season=${season}`);
+                const standMap = Object.fromEntries(standings.map(s => [s.team_id, s]));
+                c.innerHTML = `<table>
+                    <thead><tr><th>Team</th><th>City</th><th>Founded</th><th>Record</th><th>Win%</th></tr></thead>
+                    <tbody>${teams.map(t => {
+                        const s = standMap[t.id];
+                        return `
+                            <tr>
+                                <td><span class="clickable" onclick="openTeam(${t.id})">${t.full_name}</span></td>
+                                <td>${t.city}, ${t.state}</td>
+                                <td class="num">${t.year_founded}</td>
+                                <td class="num" style="font-weight:600;">${s ? `${s.wins}-${s.losses}` : '-'}</td>
+                                <td class="num">${s ? (s.win_pct * 100).toFixed(1) + '%' : '-'}</td>
+                            </tr>
+                        `;
+                    }).join('')}</tbody>
+                </table>`;
+            } catch(e) { c.innerHTML = `<div class="error">Error loading teams: ${e.message}</div>`; }
+        }
+
+        function renderPagination(key) {
+            const s = page[key];
+            const pg = Math.floor(s.o / s.l) + 1;
+            const tot = Math.ceil(s.t / s.l);
+            document.getElementById(`${key}-pagination`).innerHTML = `
+                <button ${s.o === 0 ? 'disabled' : ''} onclick="paginate('${key}', -1)">Previous</button>
+                <span class="pagination-info">Page ${pg} of ${tot}</span>
+                <button ${s.o + s.l >= s.t ? 'disabled' : ''} onclick="paginate('${key}', 1)">Next</button>
+            `;
+        }
+
+        function paginate(key, dir) {
+            page[key].o += dir * page[key].l;
+            if (page[key].o < 0) page[key].o = 0;
+            ({players: () => loadPlayers(false), games: () => loadGames(false)})[key]();
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        async function openPlayer(id) {
+            const m = document.getElementById('player-modal');
+            const b = document.getElementById('player-modal-body');
+            m.classList.add('active');
+            b.innerHTML = '<div class="loading">Loading player</div>';
+            try {
+                const [p, stats] = await Promise.all([
+                    api(`/api/players/${id}`),
+                    api(`/api/players/${id}/stats`).catch(() => [])
+                ]);
+                document.getElementById('player-modal-title').textContent = p.full_name;
+                const cur = stats.find(s => s.season === season);
+                b.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-box"><div class="stat-box-value">${cur?.ppg || '-'}</div><div class="stat-box-label">PPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${cur?.rpg || '-'}</div><div class="stat-box-label">RPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${cur?.apg || '-'}</div><div class="stat-box-label">APG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${cur?.spg || '-'}</div><div class="stat-box-label">SPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${cur?.bpg || '-'}</div><div class="stat-box-label">BPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${cur?.games_played || '-'}</div><div class="stat-box-label">GP</div></div>
+                    </div>
+                    ${stats.length ? `
+                        <h3 class="section-subtitle">Career Statistics</h3>
+                        <div class="table-container"><div class="table-scroll">
+                            <table>
+                                <thead><tr><th>Season</th><th>GP</th><th>PPG</th><th>RPG</th><th>APG</th><th>FG%</th><th>3P%</th><th>FT%</th></tr></thead>
+                                <tbody>${stats.map(s => `
+                                    <tr>
+                                        <td style="font-weight:600;">${s.season}</td>
+                                        <td class="num">${s.games_played}</td>
+                                        <td class="num" style="color:var(--accent);font-weight:600;">${s.ppg}</td>
+                                        <td class="num">${s.rpg}</td>
+                                        <td class="num">${s.apg}</td>
+                                        <td class="num">${s.fg_pct ? (s.fg_pct * 100).toFixed(1) + '%' : '-'}</td>
+                                        <td class="num">${s.fg3_pct ? (s.fg3_pct * 100).toFixed(1) + '%' : '-'}</td>
+                                        <td class="num">${s.ft_pct ? (s.ft_pct * 100).toFixed(1) + '%' : '-'}</td>
+                                    </tr>
+                                `).join('')}</tbody>
+                            </table>
+                        </div></div>
+                    ` : '<p style="color:var(--text-muted);text-align:center;padding:2rem;">No statistics available</p>'}
+                `;
+            } catch(e) { b.innerHTML = `<div class="error">Error loading player: ${e.message}</div>`; }
+        }
+
+        async function openGame(id) {
+            const m = document.getElementById('game-modal');
+            const b = document.getElementById('game-modal-body');
+            m.classList.add('active');
+            b.innerHTML = '<div class="loading">Loading game</div>';
+            try {
+                const d = await api(`/api/games/${id}/boxscore`);
+                const g = d.game;
+                const homeWin = g.home_score > g.away_score;
+                document.getElementById('game-modal-title').textContent = `${g.away_team} @ ${g.home_team}`;
+                b.innerHTML = `
+                    <div class="game-score-display">
+                        <div class="game-score-date">${g.game_date || ''}</div>
+                        <div class="game-score-teams">
+                            <div class="game-score-team">
+                                <div class="game-score-team-name">${g.away_team}</div>
+                                <div class="game-score-team-score ${!homeWin ? 'winner' : ''}">${g.away_score}</div>
+                            </div>
+                            <div class="game-score-vs">-</div>
+                            <div class="game-score-team">
+                                <div class="game-score-team-name">${g.home_team}</div>
+                                <div class="game-score-team-score ${homeWin ? 'winner' : ''}">${g.home_score}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <h3 class="section-subtitle">${g.away_team}</h3>
+                    ${boxscoreTable(d.away_players)}
+                    <h3 class="section-subtitle" style="margin-top:1.5rem;">${g.home_team}</h3>
+                    ${boxscoreTable(d.home_players)}
+                `;
+            } catch(e) { b.innerHTML = `<div class="error">Error loading game: ${e.message}</div>`; }
+        }
+
+        function boxscoreTable(players) {
+            return `<div class="table-container"><div class="table-scroll"><table>
+                <thead><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FG</th><th>3PT</th><th>FT</th><th>+/-</th></tr></thead>
+                <tbody>${players.map(p => `
+                    <tr>
+                        <td><span class="clickable" onclick="openPlayer(${p.player_id})">${p.player_name}</span></td>
+                        <td class="num">${p.minutes ? Math.round(p.minutes) : '-'}</td>
+                        <td class="num" style="${p.points >= 20 ? 'color:var(--accent);font-weight:600;' : ''}">${p.points}</td>
+                        <td class="num" style="${p.rebounds >= 10 ? 'color:var(--accent-blue);font-weight:600;' : ''}">${p.rebounds}</td>
+                        <td class="num" style="${p.assists >= 10 ? 'color:var(--accent-green);font-weight:600;' : ''}">${p.assists}</td>
+                        <td class="num">${p.steals}</td>
+                        <td class="num">${p.blocks}</td>
+                        <td class="num">${p.fgm}-${p.fga}</td>
+                        <td class="num">${p.fg3m}-${p.fg3a}</td>
+                        <td class="num">${p.ftm}-${p.fta}</td>
+                        <td class="num" style="${p.plus_minus > 0 ? 'color:var(--accent-green);' : p.plus_minus < 0 ? 'color:#ef4444;' : ''}">${p.plus_minus > 0 ? '+' : ''}${p.plus_minus || 0}</td>
+                    </tr>
+                `).join('')}</tbody>
+            </table></div></div>`;
+        }
+
+        async function openTeam(id) {
+            const m = document.getElementById('team-modal');
+            const b = document.getElementById('team-modal-body');
+            m.classList.add('active');
+            b.innerHTML = '<div class="loading">Loading team</div>';
+            try {
+                const [t, games, standings] = await Promise.all([
+                    api(`/api/teams/${id}`),
+                    api(`/api/games?season=${season}&team_id=${id}&limit=10`),
+                    api(`/api/standings?season=${season}`)
+                ]);
+                const s = standings.find(x => x.team_id === id);
+                const rank = standings.findIndex(x => x.team_id === id) + 1;
+                document.getElementById('team-modal-title').textContent = t.full_name;
+                b.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-box"><div class="stat-box-value">${s?.wins || '-'}</div><div class="stat-box-label">Wins</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${s?.losses || '-'}</div><div class="stat-box-label">Losses</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${s ? (s.win_pct * 100).toFixed(1) + '%' : '-'}</div><div class="stat-box-label">Win%</div></div>
+                        <div class="stat-box"><div class="stat-box-value">#${rank || '-'}</div><div class="stat-box-label">Rank</div></div>
+                    </div>
+                    <p style="color:var(--text-muted);margin-bottom:1.5rem;">${t.city}, ${t.state} &middot; Founded ${t.year_founded}</p>
+                    <h3 class="section-subtitle">Recent Games</h3>
+                    <div class="table-container"><div class="table-scroll"><table>
+                        <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th></tr></thead>
+                        <tbody>${games.data.map(g => {
+                            const home = g.home_team_id === id;
+                            const opp = home ? g.away_team : g.home_team;
+                            const ts = home ? g.home_score : g.away_score;
+                            const os = home ? g.away_score : g.home_score;
+                            const win = ts > os;
+                            return `
+                                <tr style="cursor:pointer;" onclick="openGame('${g.id}')">
+                                    <td>${g.game_date || '-'}</td>
+                                    <td>${home ? 'vs' : '@'} ${opp}</td>
+                                    <td><span class="badge badge-${win ? 'win' : 'loss'}">${win ? 'W' : 'L'}</span></td>
+                                    <td class="num" style="font-weight:600;">${ts}-${os}</td>
+                                </tr>
+                            `;
+                        }).join('')}</tbody>
+                    </table></div></div>
+                `;
+            } catch(e) { b.innerHTML = `<div class="error">Error loading team: ${e.message}</div>`; }
+        }
+    </script>
+</body>
+</html>
