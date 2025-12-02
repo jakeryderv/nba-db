@@ -1,0 +1,240 @@
+================================================================================
+                    NBA DATABASE - ENTITY RELATIONSHIP DIAGRAM
+================================================================================
+
+
+TABLES
+================================================================================
+
++---------------------------+       +---------------------------+
+|         seasons           |       |          teams            |
++---------------------------+       +---------------------------+
+| PK id          VARCHAR(10)|       | PK id             BIGINT  |
+|    start_year  INTEGER    |       |    full_name   VARCHAR(100)|
+|    end_year    INTEGER    |       |    abbreviation VARCHAR(3)|
+|    games_count INTEGER    |       |    nickname    VARCHAR(50)|
+|    players_count INTEGER  |       |    city        VARCHAR(50)|
+|    loaded_at   TIMESTAMP  |       |    state       VARCHAR(50)|
++---------------------------+       |    year_founded  INTEGER  |
+                                    +---------------------------+
+                                                |
++---------------------------+                   |
+|         players           |                   |
++---------------------------+                   |
+| PK id          BIGINT     |                   |
+|    full_name VARCHAR(100) |                   |
+|    first_name VARCHAR(50) |                   |
+|    last_name  VARCHAR(50) |                   |
+|    is_active  BOOLEAN     |                   |
++---------------------------+                   |
+            |                                   |
+            |                                   |
+            |         +-------------------------+
+            |         |                         |
+            |         v                         v
+            |   +---------------------------+   |
+            |   |          games            |   |
+            |   +---------------------------+   |
+            |   | PK id          VARCHAR(20)|   |
+            |   | FK home_team_id    BIGINT |---+
+            |   | FK away_team_id    BIGINT |---+
+            |   |    game_date       DATE   |
+            |   |    season       VARCHAR(10)|
+            |   |    home_score     INTEGER |
+            |   |    away_score     INTEGER |
+            |   +---------------------------+
+            |               |
+            |               |
+            v               v
++------------------------------------------+
+|           player_game_stats              |
++------------------------------------------+
+| PK id                 INT AUTO_INCREMENT |
+| FK game_id            VARCHAR(20)        |
+| FK player_id          BIGINT             |
+| FK team_id            BIGINT             |
+|    season             VARCHAR(10)        |
+|    minutes            DECIMAL(5,1)       |
+|    points             INTEGER            |
+|    rebounds           INTEGER            |
+|    offensive_rebounds INTEGER            |
+|    defensive_rebounds INTEGER            |
+|    assists            INTEGER            |
+|    steals             INTEGER            |
+|    blocks             INTEGER            |
+|    turnovers          INTEGER            |
+|    personal_fouls     INTEGER            |
+|    fgm, fga           INTEGER            |
+|    fg_pct             DECIMAL(5,3)       |
+|    fg3m, fg3a         INTEGER            |
+|    fg3_pct            DECIMAL(5,3)       |
+|    ftm, fta           INTEGER            |
+|    ft_pct             DECIMAL(5,3)       |
+|    plus_minus         DECIMAL(6,1)       |
++------------------------------------------+
+
++------------------------------------------+
+|            team_game_stats               |
++------------------------------------------+
+| PK id                 INT AUTO_INCREMENT |
+| FK game_id            VARCHAR(20)        |
+| FK team_id            BIGINT             |
+|    season             VARCHAR(10)        |
+|    is_home            BOOLEAN            |
+|    minutes            INTEGER            |
+|    points             INTEGER            |
+|    rebounds           INTEGER            |
+|    offensive_rebounds INTEGER            |
+|    defensive_rebounds INTEGER            |
+|    assists            INTEGER            |
+|    steals             INTEGER            |
+|    blocks             INTEGER            |
+|    turnovers          INTEGER            |
+|    personal_fouls     INTEGER            |
+|    fgm, fga           INTEGER            |
+|    fg_pct             DECIMAL(5,3)       |
+|    fg3m, fg3a         INTEGER            |
+|    fg3_pct            DECIMAL(5,3)       |
+|    ftm, fta           INTEGER            |
+|    ft_pct             DECIMAL(5,3)       |
+|    plus_minus         DECIMAL(6,1)       |
++------------------------------------------+
+
+
+RELATIONSHIPS
+================================================================================
+
+  +----------+         +----------+         +--------------------+
+  |  teams   |---------<  games   >---------|  player_game_stats |
+  +----------+    1:M  +----------+   1:M   +--------------------+
+       |                    |                        ^
+       |                    |                        |
+       | 1:M                | 1:M                    | M:1
+       |                    |                        |
+       v                    v                   +----------+
+  +------------------+  +------------------+    | players  |
+  | team_game_stats  |  | team_game_stats  |    +----------+
+  +------------------+  +------------------+
+
+  Relationship Details:
+  ---------------------
+  teams (1) ----< (M) games.home_team_id     One team has many home games
+  teams (1) ----< (M) games.away_team_id     One team has many away games
+  teams (1) ----< (M) team_game_stats        One team has many game stat records
+  teams (1) ----< (M) player_game_stats      One team has many player performances
+
+  players (1) --< (M) player_game_stats      One player has many game stat records
+
+  games (1) ----< (M) team_game_stats        One game has exactly 2 team stats
+  games (1) ----< (M) player_game_stats      One game has many player stats
+
+
+CONSTRAINTS
+================================================================================
+
+  Primary Keys:
+  -------------
+  seasons.id              VARCHAR(10)    e.g., '2024-25'
+  teams.id                BIGINT         NBA team ID
+  players.id              BIGINT         NBA player ID
+  games.id                VARCHAR(20)    NBA game ID
+  team_game_stats.id      INT            Auto-increment
+  player_game_stats.id    INT            Auto-increment
+
+  Foreign Keys:
+  -------------
+  games.home_team_id          -> teams.id
+  games.away_team_id          -> teams.id
+  team_game_stats.game_id     -> games.id
+  team_game_stats.team_id     -> teams.id
+  player_game_stats.game_id   -> games.id
+  player_game_stats.player_id -> players.id
+  player_game_stats.team_id   -> teams.id
+
+  Unique Constraints:
+  -------------------
+  teams.abbreviation                      3-letter team code
+  team_game_stats (game_id, team_id)      One stat record per team per game
+  player_game_stats (game_id, player_id)  One stat record per player per game
+
+  Check Constraints:
+  ------------------
+  games:
+    - home_score >= 0
+    - away_score >= 0
+    - home_team_id != away_team_id
+
+  player_game_stats / team_game_stats:
+    - points >= 0, rebounds >= 0, assists >= 0
+    - fgm >= 0, fga >= 0, fgm <= fga
+    - fg3m >= 0, fg3a >= 0, fg3m <= fg3a
+    - ftm >= 0, fta >= 0, ftm <= fta
+
+  teams:
+    - year_founded BETWEEN 1946 AND 2030
+
+  seasons:
+    - start_year >= 1946
+    - end_year = start_year + 1
+    - games_count >= 0, players_count >= 0
+
+
+INDEXES
+================================================================================
+
+  Table: games
+    - idx_games_season (season)
+    - idx_games_date (game_date)
+
+  Table: player_game_stats
+    - idx_player_game_stats_player (player_id)
+    - idx_player_game_stats_game (game_id)
+    - idx_player_game_stats_season (season)
+    - idx_player_game_stats_player_season (player_id, season)
+
+  Table: team_game_stats
+    - idx_team_game_stats_team (team_id)
+    - idx_team_game_stats_game (game_id)
+    - idx_team_game_stats_season (season)
+
+  Table: players
+    - idx_players_active (is_active)
+
+
+NORMALIZATION (3NF)
+================================================================================
+
+  1NF - First Normal Form:
+    - All attributes contain atomic values (no arrays or repeating groups)
+    - Each record is uniquely identifiable via primary key
+    - All tables have defined primary keys
+
+  2NF - Second Normal Form:
+    - Meets 1NF requirements
+    - All non-key attributes fully depend on the primary key
+    - No partial dependencies (stats depend on full game+player/team combo)
+
+  3NF - Third Normal Form:
+    - Meets 2NF requirements
+    - No transitive dependencies
+    - Team details only in teams table (not repeated in games)
+    - Player details only in players table (not repeated in stats)
+
+  Intentional Denormalization:
+    - 'season' column exists in games, team_game_stats, and player_game_stats
+    - Rationale: Avoids expensive joins when filtering by season
+
+
+CARDINALITY
+================================================================================
+
+  Table               | Records/Season | Description
+  --------------------|----------------|--------------------------------
+  seasons             | 1              | Metadata per loaded season
+  teams               | 30 (total)     | All NBA franchises
+  players             | ~500 active    | Players active in season
+  games               | ~1,230         | 82 games x 30 teams / 2
+  team_game_stats     | ~2,460         | 2 records per game
+  player_game_stats   | ~30,000        | ~13 players x 2 teams x 1,230 games
+
+================================================================================
