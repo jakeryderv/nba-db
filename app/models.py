@@ -179,3 +179,49 @@ class LeaderList(BaseModel):
     stat: str
     season: str
     data: list[StatLeader]
+
+
+# === Input Models for Data Entry ===
+
+
+class PlayerCreate(BaseModel):
+    id: int
+    full_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    is_active: bool = True
+
+
+class GameCreate(BaseModel):
+    id: str
+    game_date: date
+    season: str
+    home_team_id: int
+    away_team_id: int
+    home_score: int
+    away_score: int
+
+
+class PlayerGameStatsCreate(BaseModel):
+    game_id: str
+    player_id: int
+    team_id: int
+    season: str
+    minutes: float | None = None
+    points: int
+    rebounds: int
+    assists: int
+    steals: int
+    blocks: int
+    turnovers: int
+    personal_fouls: int = 0
+    fgm: int
+    fga: int
+    fg_pct: float | None = None
+    fg3m: int
+    fg3a: int
+    fg3_pct: float | None = None
+    ftm: int
+    fta: int
+    ft_pct: float | None = None
+    plus_minus: float | None = None

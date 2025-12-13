@@ -653,6 +653,420 @@
             text-align: center;
         }
 
+        /* Entry Forms */
+        .entry-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+        }
+        .entry-tab {
+            padding: 0.6rem 1.25rem;
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .entry-tab:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .entry-tab.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        .entry-form {
+            display: none;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            max-width: 700px;
+        }
+        .entry-form.active {
+            display: block;
+        }
+        .form-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: var(--text);
+        }
+        .form-subtitle {
+            font-size: 1rem;
+            font-weight: 600;
+            margin: 1.5rem 0 1rem;
+            color: var(--text-muted);
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+        .data-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .form-group label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+        }
+        .form-group input,
+        .form-group select {
+            padding: 0.6rem 0.75rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .form-group input::placeholder {
+            color: var(--text-muted);
+            opacity: 0.6;
+        }
+        .form-actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+        .btn-submit {
+            padding: 0.7rem 1.5rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-submit:hover {
+            background: var(--accent-light);
+        }
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .btn-reset {
+            padding: 0.7rem 1.5rem;
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-reset:hover {
+            border-color: var(--text-muted);
+            color: var(--text);
+        }
+        .form-message {
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .form-message.success {
+            display: block;
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+        }
+        .form-message.error {
+            display: block;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+        }
+        .form-description {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+        .form-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .checkbox-label span {
+            font-weight: 600;
+            color: var(--accent);
+        }
+        .etl-progress {
+            margin-top: 1rem;
+            display: none;
+        }
+        .etl-progress.active {
+            display: block;
+        }
+        .etl-step {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .etl-step-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            flex-shrink: 0;
+        }
+        .etl-step.pending .etl-step-icon {
+            background: var(--border);
+            color: var(--text-muted);
+        }
+        .etl-step.running .etl-step-icon {
+            background: var(--accent);
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+        .etl-step.completed .etl-step-icon {
+            background: var(--accent-green);
+            color: white;
+        }
+        .etl-step.error .etl-step-icon {
+            background: #ef4444;
+            color: white;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .etl-step-name {
+            font-weight: 500;
+        }
+        .etl-step-status {
+            margin-left: auto;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .etl-step.completed .etl-step-status {
+            color: var(--accent-green);
+        }
+        .etl-step.error .etl-step-status {
+            color: #ef4444;
+        }
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+        .quick-select-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .quick-btn {
+            padding: 0.5rem 1rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .quick-btn:hover {
+            border-color: var(--accent);
+            background: var(--bg-secondary);
+        }
+        .etl-season-group {
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+        .etl-season-header {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 0.75rem;
+            color: var(--accent);
+        }
+
+        /* Demo / Query Styles */
+        .query-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .query-input-area {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+        .query-input-area label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.75rem;
+        }
+        #sql-query {
+            width: 100%;
+            min-height: 150px;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            resize: vertical;
+        }
+        #sql-query:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        #sql-query::placeholder {
+            color: var(--text-muted);
+            opacity: 0.6;
+        }
+        .query-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .query-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+        .query-examples {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+        .query-examples label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.75rem;
+        }
+        .example-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .example-btn {
+            padding: 0.5rem 1rem;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .example-btn:hover {
+            border-color: var(--accent);
+            background: var(--bg-secondary);
+        }
+        .query-results {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .query-placeholder {
+            padding: 3rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .query-results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+        }
+        .query-results-info {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .query-results-time {
+            font-size: 0.8rem;
+            color: var(--accent);
+        }
+        .query-results .table-scroll {
+            max-height: 500px;
+            overflow: auto;
+        }
+        .query-results table {
+            font-size: 0.85rem;
+        }
+        .query-results th {
+            position: sticky;
+            top: 0;
+            background: var(--bg-tertiary);
+            z-index: 1;
+        }
+        .query-results td {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .header-content {
@@ -678,6 +1092,12 @@
             }
             .game-score-vs {
                 display: none;
+            }
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            .entry-tabs {
+                flex-wrap: wrap;
             }
         }
     </style>
@@ -720,6 +1140,18 @@
                 <a href="#players" class="nav-link" data-section="players">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     Players
+                </a>
+            </li>
+            <li>
+                <a href="#entry" class="nav-link" data-section="entry">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                    Entry
+                </a>
+            </li>
+            <li>
+                <a href="#demo" class="nav-link" data-section="demo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+                    Demo
                 </a>
             </li>
         </ul>
@@ -791,6 +1223,319 @@
                 <div class="table-scroll" id="players-table"></div>
             </div>
             <div class="pagination" id="players-pagination"></div>
+        </section>
+
+        <!-- Entry Forms -->
+        <section id="entry" class="section">
+            <div class="section-header">
+                <h2 class="section-title">Data Entry</h2>
+            </div>
+
+            <div class="entry-tabs">
+                <button class="entry-tab active" data-form="player">Add Player</button>
+                <button class="entry-tab" data-form="game">Add Game</button>
+                <button class="entry-tab" data-form="player-stats">Add Player Stats</button>
+                <button class="entry-tab" data-form="etl">Load Season</button>
+            </div>
+
+            <!-- Add Player Form -->
+            <div class="entry-form active" id="form-player">
+                <h3 class="form-title">Add New Player</h3>
+                <form id="player-form" class="data-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="player-id">Player ID</label>
+                            <input type="number" id="player-id" name="id" required placeholder="NBA Player ID">
+                        </div>
+                        <div class="form-group">
+                            <label for="player-full-name">Full Name</label>
+                            <input type="text" id="player-full-name" name="full_name" required placeholder="LeBron James">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="player-first-name">First Name</label>
+                            <input type="text" id="player-first-name" name="first_name" placeholder="LeBron">
+                        </div>
+                        <div class="form-group">
+                            <label for="player-last-name">Last Name</label>
+                            <input type="text" id="player-last-name" name="last_name" placeholder="James">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="player-is-active">Status</label>
+                            <select id="player-is-active" name="is_active">
+                                <option value="true">Active</option>
+                                <option value="false">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-submit">Add Player</button>
+                        <button type="reset" class="btn-reset">Clear</button>
+                    </div>
+                </form>
+                <div id="player-form-message" class="form-message"></div>
+            </div>
+
+            <!-- Add Game Form -->
+            <div class="entry-form" id="form-game">
+                <h3 class="form-title">Add New Game</h3>
+                <form id="game-form" class="data-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="game-id">Game ID</label>
+                            <input type="text" id="game-id" name="id" required placeholder="0022400001">
+                        </div>
+                        <div class="form-group">
+                            <label for="game-date">Game Date</label>
+                            <input type="date" id="game-date" name="game_date" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="game-season">Season</label>
+                            <select id="game-season" name="season" required></select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="game-home-team">Home Team</label>
+                            <select id="game-home-team" name="home_team_id" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="game-home-score">Home Score</label>
+                            <input type="number" id="game-home-score" name="home_score" required min="0" placeholder="110">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="game-away-team">Away Team</label>
+                            <select id="game-away-team" name="away_team_id" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="game-away-score">Away Score</label>
+                            <input type="number" id="game-away-score" name="away_score" required min="0" placeholder="105">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-submit">Add Game</button>
+                        <button type="reset" class="btn-reset">Clear</button>
+                    </div>
+                </form>
+                <div id="game-form-message" class="form-message"></div>
+            </div>
+
+            <!-- Add Player Stats Form -->
+            <div class="entry-form" id="form-player-stats">
+                <h3 class="form-title">Add Player Game Stats</h3>
+                <form id="player-stats-form" class="data-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-game-id">Game ID</label>
+                            <input type="text" id="stats-game-id" name="game_id" required placeholder="0022400001">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-player-id">Player ID</label>
+                            <input type="number" id="stats-player-id" name="player_id" required placeholder="2544">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-team">Team</label>
+                            <select id="stats-team" name="team_id" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-season">Season</label>
+                            <select id="stats-season" name="season" required></select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-minutes">Minutes</label>
+                            <input type="number" id="stats-minutes" name="minutes" step="0.1" min="0" max="60" placeholder="35.5">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-points">Points</label>
+                            <input type="number" id="stats-points" name="points" required min="0" placeholder="27">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-rebounds">Rebounds</label>
+                            <input type="number" id="stats-rebounds" name="rebounds" required min="0" placeholder="7">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-assists">Assists</label>
+                            <input type="number" id="stats-assists" name="assists" required min="0" placeholder="8">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-steals">Steals</label>
+                            <input type="number" id="stats-steals" name="steals" required min="0" placeholder="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-blocks">Blocks</label>
+                            <input type="number" id="stats-blocks" name="blocks" required min="0" placeholder="1">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-turnovers">Turnovers</label>
+                            <input type="number" id="stats-turnovers" name="turnovers" required min="0" placeholder="3">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-fouls">Personal Fouls</label>
+                            <input type="number" id="stats-fouls" name="personal_fouls" min="0" max="6" placeholder="2">
+                        </div>
+                    </div>
+                    <h4 class="form-subtitle">Shooting Stats</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-fgm">FGM</label>
+                            <input type="number" id="stats-fgm" name="fgm" required min="0" placeholder="10">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-fga">FGA</label>
+                            <input type="number" id="stats-fga" name="fga" required min="0" placeholder="18">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-fg3m">3PM</label>
+                            <input type="number" id="stats-fg3m" name="fg3m" required min="0" placeholder="2">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-fg3a">3PA</label>
+                            <input type="number" id="stats-fg3a" name="fg3a" required min="0" placeholder="5">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-ftm">FTM</label>
+                            <input type="number" id="stats-ftm" name="ftm" required min="0" placeholder="5">
+                        </div>
+                        <div class="form-group">
+                            <label for="stats-fta">FTA</label>
+                            <input type="number" id="stats-fta" name="fta" required min="0" placeholder="6">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stats-plus-minus">Plus/Minus</label>
+                            <input type="number" id="stats-plus-minus" name="plus_minus" placeholder="12">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-submit">Add Stats</button>
+                        <button type="reset" class="btn-reset">Clear</button>
+                    </div>
+                </form>
+                <div id="player-stats-form-message" class="form-message"></div>
+            </div>
+
+            <!-- Load Season (ETL) Form -->
+            <div class="entry-form" id="form-etl">
+                <h3 class="form-title">Load Complete Season(s) via ETL Pipeline</h3>
+                <p class="form-description">Run the ETL pipeline to extract data from the NBA API, transform it, and load it into the database. This process may take several minutes per season.</p>
+                <form id="etl-form" class="data-form">
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="etl-seasons">Seasons</label>
+                            <input type="text" id="etl-seasons" name="seasons" required placeholder="2024-25, 2023-24, 2022-23">
+                            <span class="form-hint">Enter one or more seasons separated by commas (e.g., 2024-25, 2023-24)</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Quick Select</label>
+                            <div class="quick-select-buttons">
+                                <button type="button" class="quick-btn" onclick="setSeasons(['2024-25'])">Current</button>
+                                <button type="button" class="quick-btn" onclick="setSeasons(['2024-25','2023-24','2022-23'])">Last 3</button>
+                                <button type="button" class="quick-btn" onclick="setSeasons(['2024-25','2023-24','2022-23','2021-22','2020-21'])">Last 5</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>ETL Steps</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="etl-extract" name="extract" checked>
+                                    <span>Extract</span> - Download data from NBA API
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="etl-transform" name="transform" checked>
+                                    <span>Transform</span> - Convert to clean CSV format
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="etl-load" name="load" checked>
+                                    <span>Load</span> - Insert into database
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-submit">Run ETL Pipeline</button>
+                    </div>
+                </form>
+                <div id="etl-form-message" class="form-message"></div>
+                <div id="etl-progress" class="etl-progress"></div>
+            </div>
+        </section>
+
+        <!-- Demo - SQL Query -->
+        <section id="demo" class="section">
+            <div class="section-header">
+                <h2 class="section-title">SQL Query Demo</h2>
+            </div>
+            <div class="query-container">
+                <div class="query-input-area">
+                    <label for="sql-query">Enter SQL Query</label>
+                    <textarea id="sql-query" placeholder="SELECT * FROM players WHERE is_active = 1 LIMIT 10;"></textarea>
+                    <div class="query-actions">
+                        <button id="run-query-btn" class="btn-submit">Run Query</button>
+                        <button id="clear-query-btn" class="btn-reset">Clear</button>
+                        <span class="query-hint">Only SELECT queries are allowed</span>
+                    </div>
+                </div>
+                <div class="query-examples">
+                    <label>Example Queries</label>
+                    <div class="example-buttons">
+                        <button class="example-btn" data-query="SELECT * FROM players WHERE is_active = 1 LIMIT 20;">Active Players</button>
+                        <button class="example-btn" data-query="SELECT * FROM teams ORDER BY full_name;">All Teams</button>
+                        <button class="example-btn" data-query="SELECT t.full_name, COUNT(*) as games_played
+FROM games g
+JOIN teams t ON t.id = g.home_team_id OR t.id = g.away_team_id
+WHERE g.season = '2024-25'
+GROUP BY t.id, t.full_name
+ORDER BY games_played DESC;">Games Per Team</button>
+                        <button class="example-btn" data-query="SELECT p.full_name,
+       ROUND(AVG(pgs.points), 1) as ppg,
+       ROUND(AVG(pgs.rebounds), 1) as rpg,
+       ROUND(AVG(pgs.assists), 1) as apg,
+       COUNT(*) as games
+FROM player_game_stats pgs
+JOIN players p ON pgs.player_id = p.id
+WHERE pgs.season = '2024-25'
+GROUP BY pgs.player_id, p.full_name
+HAVING COUNT(*) >= 10
+ORDER BY ppg DESC
+LIMIT 20;">Top Scorers</button>
+                        <button class="example-btn" data-query="SELECT
+    (SELECT COUNT(*) FROM players) as total_players,
+    (SELECT COUNT(*) FROM teams) as total_teams,
+    (SELECT COUNT(*) FROM games) as total_games,
+    (SELECT COUNT(*) FROM player_game_stats) as total_player_stats;">Database Stats</button>
+                    </div>
+                </div>
+                <div id="query-message" class="form-message"></div>
+                <div id="query-results" class="query-results">
+                    <div class="query-placeholder">Run a query to see results here</div>
+                </div>
+            </div>
         </section>
 
     </main>
@@ -882,7 +1627,7 @@
 
         function loadSection(s) {
             s = s || document.querySelector('.nav-link.active').dataset.section;
-            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers})[s]();
+            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers, entry:loadEntry, demo:loadDemo})[s]();
         }
 
         async function loadStandings() {
@@ -1152,6 +1897,445 @@
                     </table></div></div>
                 `;
             } catch(e) { b.innerHTML = `<div class="error">Error loading team: ${e.message}</div>`; }
+        }
+
+        // === Entry Form Functions ===
+
+        let entryInitialized = false;
+
+        function loadEntry() {
+            if (entryInitialized) return;
+            entryInitialized = true;
+
+            // Populate team and season dropdowns
+            const teamOpts = teams.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('');
+            document.getElementById('game-home-team').innerHTML = '<option value="">Select Team</option>' + teamOpts;
+            document.getElementById('game-away-team').innerHTML = '<option value="">Select Team</option>' + teamOpts;
+            document.getElementById('stats-team').innerHTML = '<option value="">Select Team</option>' + teamOpts;
+
+            api('/api/seasons').then(seasons => {
+                const seasonOpts = seasons.map(s => `<option value="${s.id}">${s.id}</option>`).join('');
+                document.getElementById('game-season').innerHTML = seasonOpts;
+                document.getElementById('stats-season').innerHTML = seasonOpts;
+            });
+
+            // Entry tab switching
+            document.querySelectorAll('.entry-tab').forEach(tab => {
+                tab.onclick = () => {
+                    document.querySelectorAll('.entry-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.entry-form').forEach(f => f.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById(`form-${tab.dataset.form}`).classList.add('active');
+                };
+            });
+
+            // Player form submission
+            document.getElementById('player-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const form = e.target;
+                const msg = document.getElementById('player-form-message');
+                const btn = form.querySelector('.btn-submit');
+
+                const data = {
+                    id: parseInt(form.id.value),
+                    full_name: form.full_name.value,
+                    first_name: form.first_name.value || null,
+                    last_name: form.last_name.value || null,
+                    is_active: form.is_active.value === 'true'
+                };
+
+                btn.disabled = true;
+                btn.textContent = 'Adding...';
+
+                try {
+                    const r = await fetch('/api/players', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await r.json();
+                    if (!r.ok) throw new Error(result.detail || 'Failed to add player');
+                    msg.className = 'form-message success';
+                    msg.textContent = `Player "${data.full_name}" added successfully!`;
+                    form.reset();
+                } catch (err) {
+                    msg.className = 'form-message error';
+                    msg.textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Add Player';
+                }
+            };
+
+            // Game form submission
+            document.getElementById('game-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const form = e.target;
+                const msg = document.getElementById('game-form-message');
+                const btn = form.querySelector('.btn-submit');
+
+                const data = {
+                    id: form.id.value,
+                    game_date: form.game_date.value,
+                    season: form.season.value,
+                    home_team_id: parseInt(form.home_team_id.value),
+                    away_team_id: parseInt(form.away_team_id.value),
+                    home_score: parseInt(form.home_score.value),
+                    away_score: parseInt(form.away_score.value)
+                };
+
+                btn.disabled = true;
+                btn.textContent = 'Adding...';
+
+                try {
+                    const r = await fetch('/api/games', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await r.json();
+                    if (!r.ok) throw new Error(result.detail || 'Failed to add game');
+                    msg.className = 'form-message success';
+                    msg.textContent = `Game ${data.id} added successfully!`;
+                    form.reset();
+                } catch (err) {
+                    msg.className = 'form-message error';
+                    msg.textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Add Game';
+                }
+            };
+
+            // Player Stats form submission
+            document.getElementById('player-stats-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const form = e.target;
+                const msg = document.getElementById('player-stats-form-message');
+                const btn = form.querySelector('.btn-submit');
+
+                const fgm = parseInt(form.fgm.value);
+                const fga = parseInt(form.fga.value);
+                const fg3m = parseInt(form.fg3m.value);
+                const fg3a = parseInt(form.fg3a.value);
+                const ftm = parseInt(form.ftm.value);
+                const fta = parseInt(form.fta.value);
+
+                const data = {
+                    game_id: form.game_id.value,
+                    player_id: parseInt(form.player_id.value),
+                    team_id: parseInt(form.team_id.value),
+                    season: form.season.value,
+                    minutes: form.minutes.value ? parseFloat(form.minutes.value) : null,
+                    points: parseInt(form.points.value),
+                    rebounds: parseInt(form.rebounds.value),
+                    assists: parseInt(form.assists.value),
+                    steals: parseInt(form.steals.value),
+                    blocks: parseInt(form.blocks.value),
+                    turnovers: parseInt(form.turnovers.value),
+                    personal_fouls: form.personal_fouls.value ? parseInt(form.personal_fouls.value) : 0,
+                    fgm: fgm,
+                    fga: fga,
+                    fg_pct: fga > 0 ? fgm / fga : null,
+                    fg3m: fg3m,
+                    fg3a: fg3a,
+                    fg3_pct: fg3a > 0 ? fg3m / fg3a : null,
+                    ftm: ftm,
+                    fta: fta,
+                    ft_pct: fta > 0 ? ftm / fta : null,
+                    plus_minus: form.plus_minus.value ? parseInt(form.plus_minus.value) : null
+                };
+
+                btn.disabled = true;
+                btn.textContent = 'Adding...';
+
+                try {
+                    const r = await fetch('/api/player-game-stats', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await r.json();
+                    if (!r.ok) throw new Error(result.detail || 'Failed to add stats');
+                    msg.className = 'form-message success';
+                    msg.textContent = `Player stats added successfully!`;
+                    form.reset();
+                } catch (err) {
+                    msg.className = 'form-message error';
+                    msg.textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Add Stats';
+                }
+            };
+
+            // ETL form submission
+            document.getElementById('etl-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const form = e.target;
+                const msg = document.getElementById('etl-form-message');
+                const progress = document.getElementById('etl-progress');
+                const btn = form.querySelector('.btn-submit');
+
+                // Parse seasons from comma-separated input
+                const seasonsInput = form.seasons.value.trim();
+                const seasons = seasonsInput.split(/[,\s]+/).map(s => s.trim()).filter(s => s);
+
+                if (seasons.length === 0) {
+                    msg.className = 'form-message error';
+                    msg.textContent = 'Please enter at least one season';
+                    msg.style.display = 'block';
+                    return;
+                }
+
+                // Validate season format
+                const seasonRegex = /^\d{4}-\d{2}$/;
+                const invalidSeasons = seasons.filter(s => !seasonRegex.test(s));
+                if (invalidSeasons.length > 0) {
+                    msg.className = 'form-message error';
+                    msg.textContent = `Invalid season format: ${invalidSeasons.join(', ')}. Use YYYY-YY (e.g., 2024-25)`;
+                    msg.style.display = 'block';
+                    return;
+                }
+
+                const data = {
+                    seasons: seasons,
+                    extract: form.extract.checked,
+                    transform: form.transform.checked,
+                    load: form.load.checked
+                };
+
+                // Validate at least one step is selected
+                if (!data.extract && !data.transform && !data.load) {
+                    msg.className = 'form-message error';
+                    msg.textContent = 'Please select at least one ETL step';
+                    msg.style.display = 'block';
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.textContent = `Running (0/${seasons.length})...`;
+                msg.className = 'form-message';
+                msg.style.display = 'none';
+
+                // Build progress UI for each season
+                const stepNames = [];
+                if (data.extract) stepNames.push({ key: 'extract', name: 'Extract' });
+                if (data.transform) stepNames.push({ key: 'transform', name: 'Transform' });
+                if (data.load) stepNames.push({ key: 'load', name: 'Load' });
+
+                progress.innerHTML = seasons.map(season => `
+                    <div class="etl-season-group" id="etl-season-${season.replace('-', '')}">
+                        <div class="etl-season-header">Season ${season}</div>
+                        ${stepNames.map((s, i) => `
+                            <div class="etl-step pending" id="etl-step-${season.replace('-', '')}-${s.key}">
+                                <div class="etl-step-icon">${i + 1}</div>
+                                <div class="etl-step-name">${s.name}</div>
+                                <div class="etl-step-status">Pending</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `).join('');
+                progress.classList.add('active');
+
+                // Mark first season's first step as running
+                if (seasons.length > 0 && stepNames.length > 0) {
+                    const firstStep = document.getElementById(`etl-step-${seasons[0].replace('-', '')}-${stepNames[0].key}`);
+                    if (firstStep) {
+                        firstStep.className = 'etl-step running';
+                        firstStep.querySelector('.etl-step-status').textContent = 'Running...';
+                    }
+                }
+
+                try {
+                    const r = await fetch('/api/etl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await r.json();
+
+                    if (!r.ok) throw new Error(result.detail || 'ETL pipeline failed');
+
+                    // Update progress UI based on results
+                    result.results.forEach(seasonResult => {
+                        const seasonKey = seasonResult.season.replace('-', '');
+                        stepNames.forEach(s => {
+                            const stepEl = document.getElementById(`etl-step-${seasonKey}-${s.key}`);
+                            if (!stepEl) return;
+
+                            if (seasonResult.steps_completed.includes(s.key)) {
+                                stepEl.className = 'etl-step completed';
+                                stepEl.querySelector('.etl-step-status').textContent = 'Completed';
+                                stepEl.querySelector('.etl-step-icon').textContent = '✓';
+                            } else if (seasonResult.errors.length > 0) {
+                                const failedOnThis = seasonResult.errors.some(e => e.toLowerCase().includes(s.key));
+                                const stepIndex = stepNames.findIndex(x => x.key === s.key);
+                                if (failedOnThis || stepIndex === seasonResult.steps_completed.length) {
+                                    stepEl.className = 'etl-step error';
+                                    stepEl.querySelector('.etl-step-status').textContent = 'Failed';
+                                    stepEl.querySelector('.etl-step-icon').textContent = '✗';
+                                } else if (stepIndex > seasonResult.steps_completed.length) {
+                                    stepEl.className = 'etl-step pending';
+                                    stepEl.querySelector('.etl-step-status').textContent = 'Skipped';
+                                }
+                            }
+                        });
+                    });
+
+                    // Show result message
+                    const successCount = result.results.filter(r => r.success).length;
+                    if (result.success) {
+                        msg.className = 'form-message success';
+                        msg.textContent = result.message;
+                        msg.style.display = 'block';
+                        // Refresh seasons dropdown
+                        const seasonsData = await api('/api/seasons');
+                        document.getElementById('season-select').innerHTML = seasonsData.map(s =>
+                            `<option value="${s.id}"${s.id===season?' selected':''}>${s.id}</option>`
+                        ).join('');
+                    } else {
+                        msg.className = 'form-message error';
+                        const errors = result.results.filter(r => !r.success).map(r => `${r.season}: ${r.errors.join(', ')}`);
+                        msg.textContent = `${result.message}. Errors: ${errors.join('; ')}`;
+                        msg.style.display = 'block';
+                    }
+                } catch (err) {
+                    msg.className = 'form-message error';
+                    msg.textContent = err.message;
+                    msg.style.display = 'block';
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Run ETL Pipeline';
+                }
+            };
+        }
+
+        function setSeasons(seasons) {
+            document.getElementById('etl-seasons').value = seasons.join(', ');
+        }
+
+        // === Demo Tab Functions ===
+
+        let demoInitialized = false;
+
+        function loadDemo() {
+            if (demoInitialized) return;
+            demoInitialized = true;
+
+            const queryInput = document.getElementById('sql-query');
+            const runBtn = document.getElementById('run-query-btn');
+            const clearBtn = document.getElementById('clear-query-btn');
+            const resultsDiv = document.getElementById('query-results');
+            const msgDiv = document.getElementById('query-message');
+
+            // Run query button
+            runBtn.onclick = () => runQuery();
+
+            // Clear button
+            clearBtn.onclick = () => {
+                queryInput.value = '';
+                resultsDiv.innerHTML = '<div class="query-placeholder">Run a query to see results here</div>';
+                msgDiv.className = 'form-message';
+                msgDiv.style.display = 'none';
+            };
+
+            // Example query buttons
+            document.querySelectorAll('.example-btn').forEach(btn => {
+                btn.onclick = () => {
+                    queryInput.value = btn.dataset.query;
+                    runQuery();
+                };
+            });
+
+            // Ctrl+Enter to run query
+            queryInput.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    runQuery();
+                }
+            });
+        }
+
+        async function runQuery() {
+            const queryInput = document.getElementById('sql-query');
+            const runBtn = document.getElementById('run-query-btn');
+            const resultsDiv = document.getElementById('query-results');
+            const msgDiv = document.getElementById('query-message');
+
+            const query = queryInput.value.trim();
+            if (!query) {
+                msgDiv.className = 'form-message error';
+                msgDiv.textContent = 'Please enter a query';
+                msgDiv.style.display = 'block';
+                return;
+            }
+
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running...';
+            msgDiv.style.display = 'none';
+            resultsDiv.innerHTML = '<div class="loading">Executing query</div>';
+
+            try {
+                const r = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                const result = await r.json();
+
+                if (!r.ok) {
+                    throw new Error(result.detail || 'Query failed');
+                }
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Query failed');
+                }
+
+                // Display results
+                if (result.row_count === 0) {
+                    resultsDiv.innerHTML = `
+                        <div class="query-results-header">
+                            <span class="query-results-info">No results</span>
+                            <span class="query-results-time">${result.execution_time_ms}ms</span>
+                        </div>
+                        <div class="query-placeholder">Query returned no rows</div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="query-results-header">
+                            <span class="query-results-info">${result.row_count} row${result.row_count !== 1 ? 's' : ''} returned</span>
+                            <span class="query-results-time">${result.execution_time_ms}ms</span>
+                        </div>
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>${result.columns.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>
+                                </thead>
+                                <tbody>
+                                    ${result.rows.map(row => `
+                                        <tr>${result.columns.map(c => `<td title="${escapeHtml(String(row[c] ?? ''))}">${escapeHtml(String(row[c] ?? 'NULL'))}</td>`).join('')}</tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                msgDiv.className = 'form-message error';
+                msgDiv.textContent = err.message;
+                msgDiv.style.display = 'block';
+                resultsDiv.innerHTML = '<div class="query-placeholder">Query failed - see error above</div>';
+            } finally {
+                runBtn.disabled = false;
+                runBtn.textContent = 'Run Query';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
     </script>
 </body>

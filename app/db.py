@@ -58,10 +58,14 @@ def get_db() -> Generator[mysql.connector.MySQLConnection, None, None]:
 
 @contextmanager
 def get_cursor() -> Generator[mysql.connector.cursor.MySQLCursorDict, None, None]:
-    """Get a database cursor that returns dicts."""
+    """Get a database cursor that returns dicts. Auto-commits on success."""
     with get_db() as conn:
         cur = conn.cursor(dictionary=True)
         try:
             yield cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             cur.close()
