@@ -1,6 +1,7 @@
 """Shared PostgreSQL connection configuration."""
 
 import os
+from typing import Any
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def get_db_config() -> dict[str, str | int]:
+def get_db_config() -> dict[str, Any]:
     """Return PostgreSQL connection parameters."""
     database_url = os.getenv("DATABASE_URL")
     if database_url:
