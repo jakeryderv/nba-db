@@ -9,8 +9,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 # Point the app at the test database BEFORE any app/db imports.
-# load_dotenv() does not override already-set environment variables.
-os.environ.pop("DATABASE_URL", None)
+# DATABASE_URL is set to "" (not popped): load_dotenv() only fills in MISSING
+# keys, so an empty value blocks a .env-supplied DATABASE_URL from being
+# loaded, and get_db_config() treats "" as unset.
+os.environ["DATABASE_URL"] = ""
 os.environ["DB_NAME"] = "nba_db_test"
 
 import init_db  # scripts/init_db.py (via sys.path above)
