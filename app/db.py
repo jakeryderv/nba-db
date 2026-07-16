@@ -17,10 +17,11 @@ def get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
         _pool = ConnectionPool(
-            conninfo=get_conninfo(),
+            conninfo=get_conninfo(readonly=True),
             kwargs={"row_factory": dict_row},
             min_size=2,
             max_size=10,
+            open=True,
         )
     return _pool
 
