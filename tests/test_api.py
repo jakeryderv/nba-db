@@ -130,18 +130,14 @@ def test_boxscore(client):
 
 
 def test_list_team_game_stats(client):
-    r = client.get(
-        "/api/team-game-stats", params={"season": SEED_SEASON, "team_id": CELTICS}
-    )
+    r = client.get("/api/team-game-stats", params={"season": SEED_SEASON, "team_id": CELTICS})
     body = r.json()
     assert body["total"] == 10
     assert all(s["team_abbr"] == "BOS" for s in body["data"])
 
 
 def test_list_player_game_stats(client):
-    r = client.get(
-        "/api/player-game-stats", params={"season": SEED_SEASON, "player_id": TATUM}
-    )
+    r = client.get("/api/player-game-stats", params={"season": SEED_SEASON, "player_id": TATUM})
     body = r.json()
     assert body["total"] == 5
 

@@ -1,4 +1,4 @@
-.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform load etl etl-multi test clean clean-season seasons status lint format typecheck check api
+.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform load etl etl-multi test test-data clean clean-season seasons status lint format typecheck check api
 
 # Configuration
 SEASON ?= 2024-25
@@ -29,7 +29,8 @@ help:
 	@echo "  Override seasons: make etl-multi SEASONS='2023-24 2022-23'"
 	@echo ""
 	@echo "Testing & Quality:"
-	@echo "  make test        - Run data quality tests"
+	@echo "  make test        - Run API test suite (requires make db-start)"
+	@echo "  make test-data   - Run data quality tests (requires loaded data)"
 	@echo "  make lint        - Run ruff linter"
 	@echo "  make format      - Format code with ruff"
 	@echo "  make typecheck   - Run mypy type checker"
@@ -104,14 +105,17 @@ seasons:
 
 # Testing & Quality
 test:
+	PYTHONPATH=. uv run pytest tests/ -v
+
+test-data:
 	PYTHONPATH=. uv run python db/tests/test_data_quality.py
 
 lint:
-	uv run ruff check etl/ app/ db/
+	uv run ruff check etl/ app/ db/ tests/
 
 format:
-	uv run ruff format etl/ app/ db/
-	uv run ruff check --fix etl/ app/ db/
+	uv run ruff format etl/ app/ db/ tests/
+	uv run ruff check --fix etl/ app/ db/ tests/
 
 typecheck:
 	uv run mypy etl/ app/ db/

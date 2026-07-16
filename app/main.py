@@ -280,10 +280,20 @@ def get_game_boxscore(game_id: str) -> dict:
 
         return {
             "game": GameDetail(**game),
-            "home_players": [PlayerGameStats(**p) for p in player_stats if p["team_id"] == game["home_team_id"]],
-            "away_players": [PlayerGameStats(**p) for p in player_stats if p["team_id"] == game["away_team_id"]],
-            "home_team_stats": next((TeamGameStats(**t) for t in team_stats if t["team_id"] == game["home_team_id"]), None),
-            "away_team_stats": next((TeamGameStats(**t) for t in team_stats if t["team_id"] == game["away_team_id"]), None),
+            "home_players": [
+                PlayerGameStats(**p) for p in player_stats if p["team_id"] == game["home_team_id"]
+            ],
+            "away_players": [
+                PlayerGameStats(**p) for p in player_stats if p["team_id"] == game["away_team_id"]
+            ],
+            "home_team_stats": next(
+                (TeamGameStats(**t) for t in team_stats if t["team_id"] == game["home_team_id"]),
+                None,
+            ),
+            "away_team_stats": next(
+                (TeamGameStats(**t) for t in team_stats if t["team_id"] == game["away_team_id"]),
+                None,
+            ),
         }
 
 
@@ -383,7 +393,13 @@ def get_leaders(
     season: str = Query(..., description="Season (required)"),
     limit: int = Query(10, ge=1, le=50),
 ) -> LeaderList:
-    stat_column = {"points": "points", "rebounds": "rebounds", "assists": "assists", "steals": "steals", "blocks": "blocks"}[stat]
+    stat_column = {
+        "points": "points",
+        "rebounds": "rebounds",
+        "assists": "assists",
+        "steals": "steals",
+        "blocks": "blocks",
+    }[stat]
 
     with get_cursor() as cur:
         cur.execute(
@@ -457,7 +473,11 @@ def get_standings(season: str = Query(..., description="Season (required)")) -> 
         )
         rows = cur.fetchall()
         return [
-            TeamStanding(**row, win_pct=round(row["wins"] / (row["wins"] + row["losses"]), 3) if row["wins"] + row["losses"] > 0 else 0)
+            TeamStanding(
+                **row,
+                win_pct=round(row["wins"] / (row["wins"] + row["losses"]), 3)
+                if row["wins"] + row["losses"] > 0
+                else 0,
+            )
             for row in rows
         ]
-

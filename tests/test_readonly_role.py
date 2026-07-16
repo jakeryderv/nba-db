@@ -1,10 +1,10 @@
 """The nba_readonly role can SELECT but cannot write."""
 
+import init_db
 import psycopg
 import pytest
 from psycopg.errors import InsufficientPrivilege
 
-import init_db
 from db.config import get_db_config
 
 

@@ -120,7 +120,9 @@ def download_league_game_log(season):
 
 def main():
     parser = argparse.ArgumentParser(description="Download NBA data")
-    parser.add_argument("--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})")
+    parser.add_argument(
+        "--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})"
+    )
     args = parser.parse_args()
 
     season = args.season

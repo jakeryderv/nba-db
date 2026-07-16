@@ -8,6 +8,20 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nba_user
+          POSTGRES_PASSWORD: nba_password
+          POSTGRES_DB: nba_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +37,15 @@ jobs:
         run: uv sync
 
       - name: Lint
-        run: uv run ruff check etl/ app/ db/
+        run: uv run ruff check etl/ app/ db/ tests/
 
       - name: Typecheck
         run: uv run mypy etl/ app/ db/
+
+      - name: Test
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USER: nba_user
+          DB_PASSWORD: nba_password
+        run: uv run pytest tests/ -v

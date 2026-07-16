@@ -13,11 +13,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 os.environ.pop("DATABASE_URL", None)
 os.environ["DB_NAME"] = "nba_db_test"
 
+import init_db  # scripts/init_db.py (via sys.path above)
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-import init_db  # scripts/init_db.py (via sys.path above)
 from db.config import get_db_config
 
 SEED_SEASON = "2024-25"

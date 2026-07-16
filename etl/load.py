@@ -51,7 +51,10 @@ def load_teams(conn):
 
     df = pd.read_csv(filepath)
     with conn.cursor() as cur:
-        values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
+        values = [
+            tuple(None if pd.isna(v) else v for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
         cur.executemany(
             """
             INSERT INTO teams (id, full_name, abbreviation, nickname, city, state, year_founded)
@@ -74,7 +77,10 @@ def load_players(conn):
 
     df = pd.read_csv(filepath)
     with conn.cursor() as cur:
-        values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
+        values = [
+            tuple(None if pd.isna(v) else v for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
         cur.executemany(
             """
             INSERT INTO players (id, full_name, first_name, last_name, is_active)
@@ -99,7 +105,10 @@ def load_games(conn, season):
     df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date
 
     with conn.cursor() as cur:
-        values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
+        values = [
+            tuple(None if pd.isna(v) else v for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
         cur.executemany(
             """
             INSERT INTO games (id, game_date, season, home_team_id, away_team_id, home_score, away_score)
@@ -122,16 +131,38 @@ def load_team_game_stats(conn, season):
 
     df = pd.read_csv(filepath)
     columns = [
-        "game_id", "team_id", "season", "is_home",
-        "minutes", "points", "rebounds", "offensive_rebounds", "defensive_rebounds",
-        "assists", "steals", "blocks", "turnovers", "personal_fouls",
-        "fgm", "fga", "fg_pct", "fg3m", "fg3a", "fg3_pct",
-        "ftm", "fta", "ft_pct", "plus_minus",
+        "game_id",
+        "team_id",
+        "season",
+        "is_home",
+        "minutes",
+        "points",
+        "rebounds",
+        "offensive_rebounds",
+        "defensive_rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+        "personal_fouls",
+        "fgm",
+        "fga",
+        "fg_pct",
+        "fg3m",
+        "fg3a",
+        "fg3_pct",
+        "ftm",
+        "fta",
+        "ft_pct",
+        "plus_minus",
     ]
     df = df[columns]
 
     with conn.cursor() as cur:
-        values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
+        values = [
+            tuple(None if pd.isna(v) else v for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
         cur.executemany(
             """
             INSERT INTO team_game_stats (
@@ -160,16 +191,38 @@ def load_player_game_stats(conn, season):
 
     df = pd.read_csv(filepath)
     columns = [
-        "game_id", "player_id", "team_id", "season",
-        "minutes", "points", "rebounds", "offensive_rebounds", "defensive_rebounds",
-        "assists", "steals", "blocks", "turnovers", "personal_fouls",
-        "fgm", "fga", "fg_pct", "fg3m", "fg3a", "fg3_pct",
-        "ftm", "fta", "ft_pct", "plus_minus",
+        "game_id",
+        "player_id",
+        "team_id",
+        "season",
+        "minutes",
+        "points",
+        "rebounds",
+        "offensive_rebounds",
+        "defensive_rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+        "personal_fouls",
+        "fgm",
+        "fga",
+        "fg_pct",
+        "fg3m",
+        "fg3a",
+        "fg3_pct",
+        "ftm",
+        "fta",
+        "ft_pct",
+        "plus_minus",
     ]
     df = df[columns]
 
     with conn.cursor() as cur:
-        values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
+        values = [
+            tuple(None if pd.isna(v) else v for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
         cur.executemany(
             """
             INSERT INTO player_game_stats (
@@ -199,7 +252,9 @@ def update_season_metadata(conn, season):
 
 def main():
     parser = argparse.ArgumentParser(description="Load NBA data into database")
-    parser.add_argument("--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})")
+    parser.add_argument(
+        "--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})"
+    )
     args = parser.parse_args()
 
     season = args.season

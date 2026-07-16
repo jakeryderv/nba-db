@@ -75,15 +75,17 @@ def transform_teams():
 
     teams = load_json(filepath)
     df = pd.DataFrame(teams)
-    df = df.rename(columns={
-        "id": "id",
-        "full_name": "full_name",
-        "abbreviation": "abbreviation",
-        "nickname": "nickname",
-        "city": "city",
-        "state": "state",
-        "year_founded": "year_founded",
-    })
+    df = df.rename(
+        columns={
+            "id": "id",
+            "full_name": "full_name",
+            "abbreviation": "abbreviation",
+            "nickname": "nickname",
+            "city": "city",
+            "state": "state",
+            "year_founded": "year_founded",
+        }
+    )
     save_csv(df, os.path.join(shared_clean, "teams.csv"))
 
 
@@ -112,11 +114,13 @@ def transform_players():
     df["first_name"] = df["DISPLAY_LAST_COMMA_FIRST"].apply(lambda x: parse_name(x)[0])
     df["last_name"] = df["DISPLAY_LAST_COMMA_FIRST"].apply(lambda x: parse_name(x)[1])
 
-    df = df.rename(columns={
-        "PERSON_ID": "id",
-        "DISPLAY_FIRST_LAST": "full_name",
-        "ROSTERSTATUS": "is_active",
-    })
+    df = df.rename(
+        columns={
+            "PERSON_ID": "id",
+            "DISPLAY_FIRST_LAST": "full_name",
+            "ROSTERSTATUS": "is_active",
+        }
+    )
     df["is_active"] = df["is_active"] == 1
     df = df[["id", "full_name", "first_name", "last_name", "is_active"]]
     save_csv(df, os.path.join(shared_clean, "players.csv"))
@@ -165,15 +169,17 @@ def transform_games(season):
         home_row = game_rows[game_rows["TEAM_ABBREVIATION"] == home_team].iloc[0]
         away_row = game_rows[game_rows["TEAM_ABBREVIATION"] == away_team].iloc[0]
 
-        games.append({
-            "id": game_id,
-            "game_date": row["GAME_DATE"],
-            "season": season,
-            "home_team_id": int(home_row["TEAM_ID"]),
-            "away_team_id": int(away_row["TEAM_ID"]),
-            "home_score": int(home_row["PTS"]),
-            "away_score": int(away_row["PTS"]),
-        })
+        games.append(
+            {
+                "id": game_id,
+                "game_date": row["GAME_DATE"],
+                "season": season,
+                "home_team_id": int(home_row["TEAM_ID"]),
+                "away_team_id": int(away_row["TEAM_ID"]),
+                "home_score": int(home_row["PTS"]),
+                "away_score": int(away_row["PTS"]),
+            }
+        )
 
     games_df = pd.DataFrame(games)
     save_csv(games_df, os.path.join(season_clean, "games.csv"))
@@ -197,39 +203,60 @@ def transform_team_game_stats(season):
     # Determine if home or away
     df["is_home"] = df["MATCHUP"].str.contains(" vs. ")
 
-    df = df.rename(columns={
-        "GAME_ID": "game_id",
-        "TEAM_ID": "team_id",
-        "MIN": "minutes",
-        "FGM": "fgm",
-        "FGA": "fga",
-        "FG_PCT": "fg_pct",
-        "FG3M": "fg3m",
-        "FG3A": "fg3a",
-        "FG3_PCT": "fg3_pct",
-        "FTM": "ftm",
-        "FTA": "fta",
-        "FT_PCT": "ft_pct",
-        "OREB": "offensive_rebounds",
-        "DREB": "defensive_rebounds",
-        "REB": "rebounds",
-        "AST": "assists",
-        "STL": "steals",
-        "BLK": "blocks",
-        "TOV": "turnovers",
-        "PF": "personal_fouls",
-        "PTS": "points",
-        "PLUS_MINUS": "plus_minus",
-    })
+    df = df.rename(
+        columns={
+            "GAME_ID": "game_id",
+            "TEAM_ID": "team_id",
+            "MIN": "minutes",
+            "FGM": "fgm",
+            "FGA": "fga",
+            "FG_PCT": "fg_pct",
+            "FG3M": "fg3m",
+            "FG3A": "fg3a",
+            "FG3_PCT": "fg3_pct",
+            "FTM": "ftm",
+            "FTA": "fta",
+            "FT_PCT": "ft_pct",
+            "OREB": "offensive_rebounds",
+            "DREB": "defensive_rebounds",
+            "REB": "rebounds",
+            "AST": "assists",
+            "STL": "steals",
+            "BLK": "blocks",
+            "TOV": "turnovers",
+            "PF": "personal_fouls",
+            "PTS": "points",
+            "PLUS_MINUS": "plus_minus",
+        }
+    )
 
     df["season"] = season
 
     columns = [
-        "game_id", "team_id", "season", "is_home",
-        "minutes", "points", "rebounds", "offensive_rebounds", "defensive_rebounds",
-        "assists", "steals", "blocks", "turnovers", "personal_fouls",
-        "fgm", "fga", "fg_pct", "fg3m", "fg3a", "fg3_pct",
-        "ftm", "fta", "ft_pct", "plus_minus",
+        "game_id",
+        "team_id",
+        "season",
+        "is_home",
+        "minutes",
+        "points",
+        "rebounds",
+        "offensive_rebounds",
+        "defensive_rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+        "personal_fouls",
+        "fgm",
+        "fga",
+        "fg_pct",
+        "fg3m",
+        "fg3a",
+        "fg3_pct",
+        "ftm",
+        "fta",
+        "ft_pct",
+        "plus_minus",
     ]
     df = df[columns]
     save_csv(df, os.path.join(season_clean, "team_game_stats.csv"))
@@ -250,40 +277,61 @@ def transform_player_game_stats(season):
     data = load_json(filepath)
     df = resultset_to_df(data)
 
-    df = df.rename(columns={
-        "GAME_ID": "game_id",
-        "PLAYER_ID": "player_id",
-        "TEAM_ID": "team_id",
-        "MIN": "minutes",
-        "FGM": "fgm",
-        "FGA": "fga",
-        "FG_PCT": "fg_pct",
-        "FG3M": "fg3m",
-        "FG3A": "fg3a",
-        "FG3_PCT": "fg3_pct",
-        "FTM": "ftm",
-        "FTA": "fta",
-        "FT_PCT": "ft_pct",
-        "OREB": "offensive_rebounds",
-        "DREB": "defensive_rebounds",
-        "REB": "rebounds",
-        "AST": "assists",
-        "STL": "steals",
-        "BLK": "blocks",
-        "TOV": "turnovers",
-        "PF": "personal_fouls",
-        "PTS": "points",
-        "PLUS_MINUS": "plus_minus",
-    })
+    df = df.rename(
+        columns={
+            "GAME_ID": "game_id",
+            "PLAYER_ID": "player_id",
+            "TEAM_ID": "team_id",
+            "MIN": "minutes",
+            "FGM": "fgm",
+            "FGA": "fga",
+            "FG_PCT": "fg_pct",
+            "FG3M": "fg3m",
+            "FG3A": "fg3a",
+            "FG3_PCT": "fg3_pct",
+            "FTM": "ftm",
+            "FTA": "fta",
+            "FT_PCT": "ft_pct",
+            "OREB": "offensive_rebounds",
+            "DREB": "defensive_rebounds",
+            "REB": "rebounds",
+            "AST": "assists",
+            "STL": "steals",
+            "BLK": "blocks",
+            "TOV": "turnovers",
+            "PF": "personal_fouls",
+            "PTS": "points",
+            "PLUS_MINUS": "plus_minus",
+        }
+    )
 
     df["season"] = season
 
     columns = [
-        "game_id", "player_id", "team_id", "season",
-        "minutes", "points", "rebounds", "offensive_rebounds", "defensive_rebounds",
-        "assists", "steals", "blocks", "turnovers", "personal_fouls",
-        "fgm", "fga", "fg_pct", "fg3m", "fg3a", "fg3_pct",
-        "ftm", "fta", "ft_pct", "plus_minus",
+        "game_id",
+        "player_id",
+        "team_id",
+        "season",
+        "minutes",
+        "points",
+        "rebounds",
+        "offensive_rebounds",
+        "defensive_rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+        "personal_fouls",
+        "fgm",
+        "fga",
+        "fg_pct",
+        "fg3m",
+        "fg3a",
+        "fg3_pct",
+        "ftm",
+        "fta",
+        "ft_pct",
+        "plus_minus",
     ]
     df = df[columns]
     save_csv(df, os.path.join(season_clean, "player_game_stats.csv"))
@@ -291,7 +339,9 @@ def transform_player_game_stats(season):
 
 def main():
     parser = argparse.ArgumentParser(description="Transform NBA data")
-    parser.add_argument("--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})")
+    parser.add_argument(
+        "--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})"
+    )
     args = parser.parse_args()
 
     season = args.season
