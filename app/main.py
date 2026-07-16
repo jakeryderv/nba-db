@@ -111,7 +111,7 @@ def list_players(
         params: list = []
 
         if search:
-            conditions.append("full_name LIKE %s")
+            conditions.append("full_name ILIKE %s")
             params.append(f"%{search}%")
         if active is not None:
             conditions.append("is_active = %s")

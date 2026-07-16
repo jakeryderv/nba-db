@@ -29,3 +29,10 @@ class TestAdminEndpointsRemoved:
     def test_create_player_game_stats_removed(self, client):
         r = client.post("/api/player-game-stats", json={})
         assert r.status_code == 405  # GET /api/player-game-stats still exists
+
+
+def test_player_search_is_case_insensitive(client):
+    r = client.get("/api/players", params={"search": "lebron"})
+    assert r.status_code == 200
+    names = [p["full_name"] for p in r.json()["data"]]
+    assert names == ["LeBron James"]
