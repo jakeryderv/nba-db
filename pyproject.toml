@@ -21,6 +21,8 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "pandas-stubs>=2.2.0",
+    "pytest>=9.1.1",
+    "httpx>=0.28.1",
 ]
 
 [tool.ruff]
@@ -45,6 +47,7 @@ ignore = [
 "etl/load.py" = ["E402"]
 "db/tests/test_data_quality.py" = ["E402"]
 "scripts/init_db.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -56,3 +59,8 @@ warn_unused_ignores = true
 disallow_untyped_defs = false
 check_untyped_defs = true
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
