@@ -1,2 +1,2 @@
--- NBA Database Triggers
--- (Simplified - no audit triggers needed)
+-- NBA Database Triggers (PostgreSQL)
+-- Reserved for future audit or validation triggers

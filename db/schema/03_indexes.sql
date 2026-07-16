@@ -1,4 +1,4 @@
--- NBA Database Indexes (MySQL)
+-- NBA Database Indexes (PostgreSQL)
 
 -- Games indexes
 CREATE INDEX idx_games_season ON games(season);

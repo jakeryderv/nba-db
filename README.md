@@ -98,7 +98,6 @@ nba-db/
 │   │   └── 06_procedures.sql  # Stored procedures
 │   ├── tests/
 │   │   └── test_data_quality.py
-│   └── dump.sql               # Complete schema dump
 │
 ├── etl/
 │   ├── extract.py         # Download from NBA API
@@ -351,8 +350,8 @@ Environment variables (`.env`):
 
 ```bash
 DB_NAME=nba_db
-DB_USER=postgres
-DB_PASSWORD=postgres
+DB_USER=nba_user
+DB_PASSWORD=nba_password
 DB_HOST=localhost
 DB_PORT=5432
 ```

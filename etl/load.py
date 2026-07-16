@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NBA Data Load Script
-Loads clean CSVs into MySQL database.
+Loads clean CSVs into PostgreSQL database.
 
 Usage:
     python load.py                    # Default season (2024-25)
@@ -10,26 +10,23 @@ Usage:
 
 import argparse
 import os
+import sys
 
 import pandas as pd
-import mysql.connector
+import psycopg
 from dotenv import load_dotenv
 
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+
+from db.config import get_db_config
+
 BASE_CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
 DEFAULT_SEASON = "2024-25"
 
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-
-DB_CONFIG = {
-    "database": os.getenv("DB_NAME", "nba_db"),
-    "user": os.getenv("DB_USER", "nba_user"),
-    "password": os.getenv("DB_PASSWORD", "nba_password"),
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": int(os.getenv("DB_PORT", "3306")),
-}
 
 
 def get_season_clean_dir(season):
@@ -41,7 +38,7 @@ def get_shared_clean_dir():
 
 
 def get_connection():
-    return mysql.connector.connect(**DB_CONFIG)
+    return psycopg.connect(**get_db_config())
 
 
 def load_teams(conn):
@@ -57,8 +54,9 @@ def load_teams(conn):
         values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
         cur.executemany(
             """
-            INSERT IGNORE INTO teams (id, full_name, abbreviation, nickname, city, state, year_founded)
+            INSERT INTO teams (id, full_name, abbreviation, nickname, city, state, year_founded)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
             """,
             values,
         )
@@ -79,8 +77,9 @@ def load_players(conn):
         values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
         cur.executemany(
             """
-            INSERT IGNORE INTO players (id, full_name, first_name, last_name, is_active)
+            INSERT INTO players (id, full_name, first_name, last_name, is_active)
             VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
             """,
             values,
         )
@@ -103,8 +102,9 @@ def load_games(conn, season):
         values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
         cur.executemany(
             """
-            INSERT IGNORE INTO games (id, game_date, season, home_team_id, away_team_id, home_score, away_score)
+            INSERT INTO games (id, game_date, season, home_team_id, away_team_id, home_score, away_score)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
             """,
             values,
         )
@@ -134,7 +134,7 @@ def load_team_game_stats(conn, season):
         values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
         cur.executemany(
             """
-            INSERT IGNORE INTO team_game_stats (
+            INSERT INTO team_game_stats (
                 game_id, team_id, season, is_home,
                 minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
                 assists, steals, blocks, turnovers, personal_fouls,
@@ -142,6 +142,7 @@ def load_team_game_stats(conn, season):
                 ftm, fta, ft_pct, plus_minus
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (game_id, team_id) DO NOTHING
             """,
             values,
         )
@@ -171,7 +172,7 @@ def load_player_game_stats(conn, season):
         values = [tuple(None if pd.isna(v) else v for v in row) for row in df.itertuples(index=False, name=None)]
         cur.executemany(
             """
-            INSERT IGNORE INTO player_game_stats (
+            INSERT INTO player_game_stats (
                 game_id, player_id, team_id, season,
                 minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
                 assists, steals, blocks, turnovers, personal_fouls,
@@ -179,6 +180,7 @@ def load_player_game_stats(conn, season):
                 ftm, fta, ft_pct, plus_minus
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (game_id, player_id) DO NOTHING
             """,
             values,
         )
@@ -190,7 +192,7 @@ def update_season_metadata(conn, season):
     """Update season metadata."""
     print("\n=== Season Metadata ===")
     with conn.cursor() as cur:
-        cur.callproc("sp_update_season_metadata", (season,))
+        cur.execute("CALL sp_update_season_metadata(%s)", (season,))
     conn.commit()
     print(f"    Updated metadata for {season}")
 

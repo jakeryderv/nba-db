@@ -7,21 +7,18 @@ Validates data integrity, completeness, and consistency.
 import os
 import sys
 
-import mysql.connector
+import psycopg
 from dotenv import load_dotenv
 
 # Load environment variables
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+sys.path.insert(0, PROJECT_ROOT)
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-DB_CONFIG = {
-    "database": os.getenv("DB_NAME", "nba_db"),
-    "user": os.getenv("DB_USER", "nba_user"),
-    "password": os.getenv("DB_PASSWORD", "nba_password"),
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": int(os.getenv("DB_PORT", "3306")),
-}
+from db.config import get_db_config
+
+DB_CONFIG = get_db_config()
 
 
 class TestResult:
@@ -33,7 +30,7 @@ class TestResult:
 
 def get_connection():
     """Create database connection."""
-    return mysql.connector.connect(**DB_CONFIG)
+    return psycopg.connect(**DB_CONFIG)
 
 
 def run_query(conn, query):
@@ -297,10 +294,10 @@ def run_all_tests():
 
     try:
         conn = get_connection()
-        print(f"\nConnected to {DB_CONFIG['database']}@{DB_CONFIG['host']}\n")
+        print(f"\nConnected to {DB_CONFIG['dbname']}@{DB_CONFIG['host']}\n")
     except Exception as e:
         print(f"\nError connecting to database: {e}")
-        print("Make sure MySQL is running and credentials are correct")
+        print("Make sure PostgreSQL is running and credentials are correct")
         sys.exit(1)
 
     tests = [

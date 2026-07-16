@@ -1,37 +1,26 @@
 """Database connection pool for FastAPI."""
 
-import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
-import mysql.connector
-from mysql.connector import pooling
-from dotenv import load_dotenv
+from psycopg import Connection
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-# Load environment variables
-load_dotenv()
+from db.config import get_conninfo
 
-DB_CONFIG = {
-    "database": os.getenv("DB_NAME", "nba_db"),
-    "user": os.getenv("DB_USER", "nba_user"),
-    "password": os.getenv("DB_PASSWORD", "nba_password"),
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": int(os.getenv("DB_PORT", "3306")),
-}
-
-# Connection pool (initialized lazily)
-_pool: pooling.MySQLConnectionPool | None = None
+_pool: ConnectionPool | None = None
 
 
-def get_pool() -> pooling.MySQLConnectionPool:
+def get_pool() -> ConnectionPool:
     """Get or create the connection pool."""
     global _pool
     if _pool is None:
-        _pool = pooling.MySQLConnectionPool(
-            pool_name="nba_pool",
-            pool_size=10,
-            pool_reset_session=True,
-            **DB_CONFIG
+        _pool = ConnectionPool(
+            conninfo=get_conninfo(),
+            kwargs={"row_factory": dict_row},
+            min_size=2,
+            max_size=10,
         )
     return _pool
 
@@ -40,32 +29,26 @@ def close_pool() -> None:
     """Close the connection pool."""
     global _pool
     if _pool is not None:
-        # MySQL connector pool doesn't have a closeall method
-        # Connections are closed when they go out of scope
+        _pool.close()
         _pool = None
 
 
 @contextmanager
-def get_db() -> Generator[mysql.connector.MySQLConnection, None, None]:
+def get_db() -> Generator[Connection, None, None]:
     """Get a database connection from the pool."""
     pool = get_pool()
-    conn = pool.get_connection()
-    try:
+    with pool.connection() as conn:
         yield conn
-    finally:
-        conn.close()
 
 
 @contextmanager
-def get_cursor() -> Generator[mysql.connector.cursor.MySQLCursorDict, None, None]:
+def get_cursor() -> Generator:
     """Get a database cursor that returns dicts. Auto-commits on success."""
     with get_db() as conn:
-        cur = conn.cursor(dictionary=True)
-        try:
-            yield cur
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            cur.close()
+        with conn.cursor() as cur:
+            try:
+                yield cur
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise

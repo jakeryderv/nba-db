@@ -1,5 +1,4 @@
--- NBA Database Constraints (MySQL)
--- Note: MySQL 8.0.16+ supports CHECK constraints
+-- NBA Database Constraints (PostgreSQL)
 
 -- Games constraints
 ALTER TABLE games ADD CONSTRAINT chk_games_home_score_positive CHECK (home_score >= 0);

@@ -12,10 +12,10 @@ help:
 	@echo "  make install     - Install Python dependencies"
 	@echo ""
 	@echo "Database:"
-	@echo "  make db-start    - Start MySQL container"
-	@echo "  make db-stop     - Stop MySQL container"
+	@echo "  make db-start    - Start PostgreSQL container"
+	@echo "  make db-stop     - Stop PostgreSQL container"
 	@echo "  make db-reset    - Reset database (destroy and recreate)"
-	@echo "  make db-shell    - Open mysql shell"
+	@echo "  make db-shell    - Open psql shell"
 	@echo "  make db-logs     - View database logs"
 	@echo ""
 	@echo "ETL Pipeline (default season: $(SEASON)):"
@@ -54,7 +54,7 @@ db-start:
 	docker compose up -d
 	@echo "Waiting for database to be ready..."
 	@sleep 5
-	@docker compose exec db mysqladmin ping -h localhost -u root -proot_password --silent || (echo "Database not ready" && exit 1)
+	@docker compose exec db pg_isready -U nba_user -d nba_db --quiet || (echo "Database not ready" && exit 1)
 	@echo "Database is ready!"
 
 db-stop:
@@ -65,11 +65,11 @@ db-reset:
 	docker compose up -d
 	@echo "Waiting for database to initialize..."
 	@sleep 10
-	@docker compose exec db mysqladmin ping -h localhost -u root -proot_password --silent || (echo "Database not ready" && exit 1)
+	@docker compose exec db pg_isready -U nba_user -d nba_db --quiet || (echo "Database not ready" && exit 1)
 	@echo "Database reset complete!"
 
 db-shell:
-	docker compose exec db mysql -u nba_user -pnba_password nba_db
+	docker compose exec db psql -U nba_user -d nba_db
 
 db-logs:
 	docker compose logs -f db
@@ -82,7 +82,7 @@ transform:
 	uv run python etl/transform.py --season $(SEASON)
 
 load:
-	uv run python etl/load.py --season $(SEASON)
+	PYTHONPATH=. uv run python etl/load.py --season $(SEASON)
 
 etl: extract transform load
 	@echo "ETL pipeline complete for season $(SEASON)!"
@@ -100,21 +100,21 @@ etl-multi:
 
 # Info commands
 seasons:
-	@docker compose exec db mysql -u nba_user -pnba_password nba_db -e "SELECT id as season, games_count, players_count, loaded_at FROM seasons ORDER BY id DESC;" 2>/dev/null || echo "Database not running"
+	@docker compose exec db psql -U nba_user -d nba_db -c "SELECT id AS season, games_count, players_count, loaded_at FROM seasons ORDER BY id DESC;" 2>/dev/null || echo "Database not running"
 
 # Testing & Quality
 test:
-	uv run python db/tests/test_data_quality.py
+	PYTHONPATH=. uv run python db/tests/test_data_quality.py
 
 lint:
-	uv run ruff check etl/ app/ db/tests/
+	uv run ruff check etl/ app/ db/
 
 format:
-	uv run ruff format etl/ app/ db/tests/
-	uv run ruff check --fix etl/ app/ db/tests/
+	uv run ruff format etl/ app/ db/
+	uv run ruff check --fix etl/ app/ db/
 
 typecheck:
-	uv run mypy etl/ app/ db/tests/
+	uv run mypy etl/ app/ db/
 
 # API
 api:
@@ -141,7 +141,7 @@ status:
 	@docker compose ps
 	@echo ""
 	@echo "=== Database Tables ==="
-	@docker compose exec db mysql -u nba_user -pnba_password nba_db -e "SHOW TABLES;" 2>/dev/null || echo "Database not running"
+	@docker compose exec db psql -U nba_user -d nba_db -c "\dt" 2>/dev/null || echo "Database not running"
 	@echo ""
 	@echo "=== Row Counts ==="
-	@docker compose exec db mysql -u nba_user -pnba_password nba_db -e "SELECT 'teams' as table_name, COUNT(*) as count FROM teams UNION ALL SELECT 'players', COUNT(*) FROM players UNION ALL SELECT 'games', COUNT(*) FROM games UNION ALL SELECT 'player_game_stats', COUNT(*) FROM player_game_stats UNION ALL SELECT 'team_game_stats', COUNT(*) FROM team_game_stats;" 2>/dev/null || echo "Database not running"
+	@docker compose exec db psql -U nba_user -d nba_db -c "SELECT 'teams' AS table_name, COUNT(*) AS count FROM teams UNION ALL SELECT 'players', COUNT(*) FROM players UNION ALL SELECT 'games', COUNT(*) FROM games UNION ALL SELECT 'player_game_stats', COUNT(*) FROM player_game_stats UNION ALL SELECT 'team_game_stats', COUNT(*) FROM team_game_stats;" 2>/dev/null || echo "Database not running"

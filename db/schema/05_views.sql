@@ -1,4 +1,4 @@
--- NBA Database Views (MySQL)
+-- NBA Database Views (PostgreSQL)
 
 -- Team Standings
 CREATE OR REPLACE VIEW vw_team_standings AS
@@ -22,7 +22,7 @@ SELECT
             WHEN (g.home_team_id = t.id AND g.home_score > g.away_score)
               OR (g.away_team_id = t.id AND g.away_score > g.home_score)
             THEN 1 ELSE 0
-        END) / NULLIF(COUNT(*), 0), 3
+        END)::NUMERIC / NULLIF(COUNT(*), 0), 3
     ) AS win_pct
 FROM teams t
 JOIN games g ON t.id = g.home_team_id OR t.id = g.away_team_id
@@ -42,9 +42,9 @@ SELECT
     ROUND(AVG(pgs.assists), 1) AS apg,
     ROUND(AVG(pgs.steals), 1) AS spg,
     ROUND(AVG(pgs.blocks), 1) AS bpg,
-    ROUND(SUM(pgs.fgm) / NULLIF(SUM(pgs.fga), 0), 3) AS fg_pct,
-    ROUND(SUM(pgs.fg3m) / NULLIF(SUM(pgs.fg3a), 0), 3) AS fg3_pct,
-    ROUND(SUM(pgs.ftm) / NULLIF(SUM(pgs.fta), 0), 3) AS ft_pct,
+    ROUND(SUM(pgs.fgm)::NUMERIC / NULLIF(SUM(pgs.fga), 0), 3) AS fg_pct,
+    ROUND(SUM(pgs.fg3m)::NUMERIC / NULLIF(SUM(pgs.fg3a), 0), 3) AS fg3_pct,
+    ROUND(SUM(pgs.ftm)::NUMERIC / NULLIF(SUM(pgs.fta), 0), 3) AS ft_pct,
     ROUND(AVG(pgs.minutes), 1) AS mpg
 FROM player_game_stats pgs
 JOIN players p ON pgs.player_id = p.id
@@ -81,8 +81,8 @@ SELECT
     ROUND(AVG(tgs.points), 1) AS ppg,
     ROUND(AVG(tgs.rebounds), 1) AS rpg,
     ROUND(AVG(tgs.assists), 1) AS apg,
-    ROUND(SUM(tgs.fgm) / NULLIF(SUM(tgs.fga), 0) * 100, 1) AS fg_pct,
-    ROUND(SUM(tgs.fg3m) / NULLIF(SUM(tgs.fg3a), 0) * 100, 1) AS fg3_pct
+    ROUND(SUM(tgs.fgm)::NUMERIC / NULLIF(SUM(tgs.fga), 0) * 100, 1) AS fg_pct,
+    ROUND(SUM(tgs.fg3m)::NUMERIC / NULLIF(SUM(tgs.fg3a), 0) * 100, 1) AS fg3_pct
 FROM team_game_stats tgs
 JOIN teams t ON tgs.team_id = t.id
 GROUP BY t.id, t.full_name, t.abbreviation, tgs.season

@@ -1,4 +1,4 @@
--- NBA Database Schema (MySQL)
+-- NBA Database Schema (PostgreSQL)
 -- Simplified tables for teams, players, games, and game stats
 
 -- Seasons table (tracks loaded seasons)
@@ -9,7 +9,7 @@ CREATE TABLE seasons (
     games_count INTEGER DEFAULT 0,
     players_count INTEGER DEFAULT 0,
     loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
+);
 
 -- Teams table
 CREATE TABLE teams (
@@ -20,7 +20,7 @@ CREATE TABLE teams (
     city VARCHAR(50) NOT NULL,
     state VARCHAR(50) NOT NULL,
     year_founded INTEGER NOT NULL
-) ENGINE=InnoDB;
+);
 
 -- Players table
 CREATE TABLE players (
@@ -29,7 +29,7 @@ CREATE TABLE players (
     first_name VARCHAR(50),
     last_name VARCHAR(50),
     is_active BOOLEAN NOT NULL DEFAULT FALSE
-) ENGINE=InnoDB;
+);
 
 -- Games table
 CREATE TABLE games (
@@ -42,11 +42,11 @@ CREATE TABLE games (
     away_score INTEGER NOT NULL,
     FOREIGN KEY (home_team_id) REFERENCES teams(id),
     FOREIGN KEY (away_team_id) REFERENCES teams(id)
-) ENGINE=InnoDB;
+);
 
 -- Team game statistics
 CREATE TABLE team_game_stats (
-    id INTEGER AUTO_INCREMENT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     game_id VARCHAR(20) NOT NULL,
     team_id BIGINT NOT NULL,
     season VARCHAR(10) NOT NULL,
@@ -76,14 +76,14 @@ CREATE TABLE team_game_stats (
     ft_pct DECIMAL(5,3),
     plus_minus DECIMAL(6,1),
 
-    UNIQUE KEY unique_game_team (game_id, team_id),
+    UNIQUE (game_id, team_id),
     FOREIGN KEY (game_id) REFERENCES games(id),
     FOREIGN KEY (team_id) REFERENCES teams(id)
-) ENGINE=InnoDB;
+);
 
 -- Player game statistics
 CREATE TABLE player_game_stats (
-    id INTEGER AUTO_INCREMENT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     game_id VARCHAR(20) NOT NULL,
     player_id BIGINT NOT NULL,
     team_id BIGINT NOT NULL,
@@ -113,8 +113,8 @@ CREATE TABLE player_game_stats (
     ft_pct DECIMAL(5,3),
     plus_minus DECIMAL(6,1),
 
-    UNIQUE KEY unique_game_player (game_id, player_id),
+    UNIQUE (game_id, player_id),
     FOREIGN KEY (game_id) REFERENCES games(id),
     FOREIGN KEY (player_id) REFERENCES players(id),
     FOREIGN KEY (team_id) REFERENCES teams(id)
-) ENGINE=InnoDB;
+);
