@@ -63,7 +63,9 @@ Other useful targets (`make help` for all): `make etl SEASON=2023-24`, `make etl
 
 ## Loading data into production
 
-Data refreshes automatically: the **Refresh Data** GitHub Actions workflow runs daily at 10:00 UTC, re-downloading the current season from the NBA API and loading it into the production database (idempotent inserts — only new games land). It can also be run on demand from the Actions tab (`workflow_dispatch`), optionally with an explicit `season` input for backfills. Note: GitHub automatically disables scheduled workflows after 60 days without repository activity — if the daily refresh stops, re-enable it from the Actions tab.
+The **Refresh Data** GitHub Actions workflow (daily at 10:00 UTC, or on demand via `workflow_dispatch` with an optional `season` input) re-downloads the current season from the NBA API and loads it into the production database (idempotent inserts — only new games land).
+
+**Current status: the schedule is disabled.** stats.nba.com blocks requests from GitHub's datacenter IPs (requests hang until timeout), so scheduled runs cannot reach the API. Until the 2026-27 season starts, refreshes are run manually from a trusted machine (see below). Options for re-enabling automation at season start: a local cron job, a self-hosted GitHub runner, or a residential proxy for the hosted runner. Also note: GitHub automatically disables scheduled workflows after 60 days without repository activity — re-enable from the Actions tab.
 
 Manual loading from a trusted machine still works:
 
@@ -95,7 +97,7 @@ Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `sc
 
 ## Roadmap
 
-- [x] Scheduled data refresh (GitHub Actions, daily)
+- [x] Scheduled data refresh (built; schedule disabled until 2026-27 — see Loading data into production)
 - [ ] Shot chart data and visualizations
 - [ ] Historical season backfill
 
