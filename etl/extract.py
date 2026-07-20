@@ -51,14 +51,14 @@ def save_json(data, filepath):
     print(f"    Saved: {os.path.basename(filepath)}")
 
 
-def download_teams():
+def download_teams(force=False):
     """Download static team data."""
     print("\n=== Teams ===")
     shared_dir = get_shared_dir()
     ensure_dir(shared_dir)
 
     filepath = os.path.join(shared_dir, "teams.json")
-    if os.path.exists(filepath):
+    if os.path.exists(filepath) and not force:
         print("  Skipping (exists)")
         return
 
@@ -67,14 +67,14 @@ def download_teams():
     print(f"  Found {len(data)} teams")
 
 
-def download_players(season):
+def download_players(season, force=False):
     """Download all players from CommonAllPlayers."""
     print("\n=== Players ===")
     shared_dir = get_shared_dir()
     ensure_dir(shared_dir)
 
     filepath = os.path.join(shared_dir, "players.json")
-    if os.path.exists(filepath):
+    if os.path.exists(filepath) and not force:
         print("  Skipping (exists)")
         return
 
@@ -91,7 +91,7 @@ def download_players(season):
     time.sleep(REQUEST_DELAY)
 
 
-def download_league_game_log(season):
+def download_league_game_log(season, force=False):
     """Download LeagueGameLog for teams and players."""
     print("\n=== LeagueGameLog ===")
     season_dir = get_season_dir(season)
@@ -100,7 +100,7 @@ def download_league_game_log(season):
     for player_or_team, label in [("T", "teams"), ("P", "players")]:
         filepath = os.path.join(season_dir, f"league_game_log_{label}.json")
 
-        if os.path.exists(filepath):
+        if os.path.exists(filepath) and not force:
             print(f"  Skipping {label} (exists)")
             continue
 
@@ -123,6 +123,11 @@ def main():
     parser.add_argument(
         "--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})"
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download files even if they already exist",
+    )
     args = parser.parse_args()
 
     season = args.season
@@ -130,9 +135,9 @@ def main():
     print(f"NBA Data Extract - Season {season}")
     print("=" * 50)
 
-    download_teams()
-    download_players(season)
-    download_league_game_log(season)
+    download_teams(force=args.force)
+    download_players(season, force=args.force)
+    download_league_game_log(season, force=args.force)
 
     print("\n" + "=" * 50)
     print("Extract complete!")
