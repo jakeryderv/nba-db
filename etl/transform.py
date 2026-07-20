@@ -181,7 +181,16 @@ def transform_games(season):
             }
         )
 
-    games_df = pd.DataFrame(games)
+    games_columns = [
+        "id",
+        "game_date",
+        "season",
+        "home_team_id",
+        "away_team_id",
+        "home_score",
+        "away_score",
+    ]
+    games_df = pd.DataFrame(games, columns=games_columns)
     save_csv(games_df, os.path.join(season_clean, "games.csv"))
 
 

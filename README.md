@@ -63,13 +63,15 @@ Other useful targets (`make help` for all): `make etl SEASON=2023-24`, `make etl
 
 ## Loading data into production
 
-The deployed app is read-only; data is loaded by pointing the ETL at the production database from a trusted machine:
+Data refreshes automatically: the **Refresh Data** GitHub Actions workflow runs daily at 10:00 UTC, re-downloading the current season from the NBA API and loading it into the production database (idempotent inserts — only new games land). It can also be run on demand from the Actions tab (`workflow_dispatch`), optionally with an explicit `season` input for backfills. Note: GitHub automatically disables scheduled workflows after 60 days without repository activity — if the daily refresh stops, re-enable it from the Actions tab.
+
+Manual loading from a trusted machine still works:
 
 ```bash
-DATABASE_URL="postgresql://user:pass@host:port/dbname" make load SEASON=2024-25
+DATABASE_URL="postgresql://user:pass@host:port/dbname" make refresh SEASON=2025-26
 ```
 
-(`extract` and `transform` only touch local files; only `load` needs the production `DATABASE_URL`.)
+(`extract`/`transform` only touch local files; only the `load` step needs the production `DATABASE_URL` — Railway's public TCP-proxy address, not the internal one.)
 
 ## Testing
 
@@ -93,7 +95,7 @@ Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `sc
 
 ## Roadmap
 
-- [ ] Scheduled data refresh (Railway cron)
+- [x] Scheduled data refresh (GitHub Actions, daily)
 - [ ] Shot chart data and visualizations
 - [ ] Historical season backfill
 

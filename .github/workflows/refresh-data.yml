@@ -1,0 +1,71 @@
+name: Refresh Data
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season to refresh (e.g. 2025-26). Defaults to the current season."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency: refresh-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Determine season
+        id: season
+        env:
+          INPUT_SEASON: ${{ inputs.season }}
+        run: |
+          if [ -n "$INPUT_SEASON" ]; then
+            echo "season=$INPUT_SEASON" >> "$GITHUB_OUTPUT"
+          else
+            echo "season=$(uv run python scripts/current_season.py)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract (with retries)
+        env:
+          SEASON: ${{ steps.season.outputs.season }}
+        run: |
+          for attempt in 1 2 3; do
+            if uv run python etl/extract.py --season "$SEASON" --force; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Extract attempt $attempt failed; retrying in 30s..."
+              sleep 30
+            fi
+          done
+          echo "Extract failed after 3 attempts (NBA API may be blocking this runner's IP)."
+          exit 1
+
+      - name: Transform
+        env:
+          SEASON: ${{ steps.season.outputs.season }}
+        run: uv run python etl/transform.py --season "$SEASON"
+
+      - name: Load
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEASON: ${{ steps.season.outputs.season }}
+        run: PYTHONPATH=. uv run python etl/load.py --season "$SEASON"

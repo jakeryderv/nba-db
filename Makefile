@@ -1,4 +1,4 @@
-.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform load etl etl-multi test test-data clean clean-season seasons status lint format typecheck check api
+.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform load etl etl-multi refresh test test-data clean clean-season seasons status lint format typecheck check api
 
 # Configuration
 SEASON ?= 2024-25
@@ -24,6 +24,7 @@ help:
 	@echo "  make load        - Load CSVs into database"
 	@echo "  make etl         - Run full ETL pipeline"
 	@echo "  make etl-multi   - Run ETL for multiple seasons"
+	@echo "  make refresh     - Force re-download + reload one season (for data refresh)"
 	@echo ""
 	@echo "  Override season:  make etl SEASON=2023-24"
 	@echo "  Override seasons: make etl-multi SEASONS='2023-24 2022-23'"
@@ -98,6 +99,12 @@ etl-multi:
 	done
 	@echo ""
 	@echo "All seasons complete!"
+
+refresh:
+	uv run python etl/extract.py --season $(SEASON) --force
+	uv run python etl/transform.py --season $(SEASON)
+	PYTHONPATH=. uv run python etl/load.py --season $(SEASON)
+	@echo "Refresh complete for season $(SEASON)!"
 
 # Info commands
 seasons:
