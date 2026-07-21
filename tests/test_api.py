@@ -63,7 +63,21 @@ def test_home_page_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "<html" in r.text.lower()
-    assert r.headers["cache-control"] == "public, max-age=300, stale-while-revalidate=3600"
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["content-security-policy"].startswith("default-src 'self'")
+    assert "'unsafe-inline'" not in r.headers["content-security-policy"]
+
+
+def test_static_assets_are_served_with_revalidation_cache(client):
+    for path, content_type in (
+        ("/static/styles.css", "text/css"),
+        ("/static/app.js", "text/javascript"),
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert content_type in response.headers["content-type"]
+        assert response.headers["cache-control"] == "public, max-age=3600, must-revalidate"
+        assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_list_seasons(client):

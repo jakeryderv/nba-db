@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.db import close_pool, get_cursor
 from app.models import (
@@ -52,17 +53,32 @@ app = FastAPI(
 )
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.middleware("http")
 async def add_cache_headers(request: Request, call_next):
     response = await call_next(request)
-    if request.method != "GET" or response.status_code >= 400:
-        return response
-    if request.url.path == "/health":
-        response.headers["Cache-Control"] = "no-store"
-    elif request.url.path == "/" or request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
+        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    )
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if request.method == "GET" and response.status_code < 400:
+        if request.url.path == "/health":
+            response.headers["Cache-Control"] = "no-store"
+        elif request.url.path == "/":
+            response.headers["Cache-Control"] = "no-cache"
+        elif request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
+        elif request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = (
+                "public, max-age=300, stale-while-revalidate=3600"
+            )
     return response
 
 
