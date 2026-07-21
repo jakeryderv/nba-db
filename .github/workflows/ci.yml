@@ -5,9 +5,25 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # CI only uses its ephemeral service database. It never receives a
+      # production DATABASE_URL or credentials.
+      DATABASE_URL: ""
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_USER: nba_user
+      DB_PASSWORD: nba_password
     services:
       postgres:
         image: postgres:16
@@ -24,6 +40,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -34,18 +52,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Lint
-        run: uv run ruff check etl/ app/ db/ scripts/ tests/
+        run: uv run --locked ruff check etl/ app/ db/ scripts/ tests/
 
       - name: Typecheck
-        run: uv run mypy etl/ app/ db/ scripts/
+        run: uv run --locked mypy etl/ app/ db/ scripts/
 
       - name: Test
-        env:
-          DB_HOST: localhost
-          DB_PORT: "5432"
-          DB_USER: nba_user
-          DB_PASSWORD: nba_password
-        run: uv run pytest tests/ -v
+        run: uv run --locked pytest tests/ -v
