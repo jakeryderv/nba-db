@@ -88,7 +88,10 @@ class PlayerSeasonAvg(BaseModel):
     player_id: int
     player_name: str
     season: str
+    team_id: int
+    team_abbr: str
     games_played: int
+    mpg: float | None = None
     ppg: float
     rpg: float
     apg: float
@@ -137,6 +140,51 @@ class TeamStanding(BaseModel):
     win_pct: float
 
 
+class TeamSeasonSummary(BaseModel):
+    team_id: int
+    season: str
+    games_played: int
+    wins: int
+    losses: int
+    win_pct: float
+    home_wins: int
+    home_losses: int
+    away_wins: int
+    away_losses: int
+    ppg: float
+    opponent_ppg: float
+    rpg: float
+    apg: float
+    spg: float
+    bpg: float
+    fg_pct: float | None = None
+    fg3_pct: float | None = None
+    ft_pct: float | None = None
+
+
+class TeamPlayerSummary(BaseModel):
+    player_id: int
+    player_name: str
+    games_played: int
+    mpg: float | None = None
+    ppg: float
+    rpg: float
+    apg: float
+    spg: float
+    bpg: float
+
+
+class PlayerGameLogEntry(PlayerGameStats):
+    game_date: date | None = None
+    opponent_id: int
+    opponent_name: str
+    opponent_abbr: str
+    is_home: bool
+    result: str
+    team_score: int
+    opponent_score: int
+
+
 # === List Response Models ===
 
 
@@ -160,6 +208,24 @@ class TeamGameStatsList(PaginatedResponse):
 
 class PlayerGameStatsList(PaginatedResponse):
     data: list[PlayerGameStats]
+
+
+class PlayerGameLog(PaginatedResponse):
+    data: list[PlayerGameLogEntry]
+
+
+class TeamPlayerSummaryList(BaseModel):
+    team_id: int
+    season: str
+    data: list[TeamPlayerSummary]
+
+
+class GameBoxScore(BaseModel):
+    game: GameDetail
+    home_players: list[PlayerGameStats]
+    away_players: list[PlayerGameStats]
+    home_team_stats: TeamGameStats | None
+    away_team_stats: TeamGameStats | None
 
 
 # === Leader Models ===

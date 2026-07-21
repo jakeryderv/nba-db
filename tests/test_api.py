@@ -85,6 +85,51 @@ def test_get_team_not_found(client):
     assert client.get("/api/teams/1").status_code == 404
 
 
+def test_team_season_stats(client):
+    r = client.get(f"/api/teams/{LAKERS}/stats", params={"season": SEED_SEASON})
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {
+        "team_id": LAKERS,
+        "season": SEED_SEASON,
+        "games_played": 10,
+        "wins": 10,
+        "losses": 0,
+        "win_pct": 1.0,
+        "home_wins": 10,
+        "home_losses": 0,
+        "away_wins": 0,
+        "away_losses": 0,
+        "ppg": 110.0,
+        "opponent_ppg": 100.0,
+        "rpg": 45.0,
+        "apg": 25.0,
+        "spg": 0.0,
+        "bpg": 0.0,
+        "fg_pct": 0.444,
+        "fg3_pct": 0.343,
+        "ft_pct": 0.818,
+    }
+
+
+def test_team_season_stats_not_found(client):
+    r = client.get(f"/api/teams/{LAKERS}/stats", params={"season": "1999-00"})
+    assert r.status_code == 404
+
+
+def test_team_players_are_ranked_by_scoring(client):
+    r = client.get(f"/api/teams/{LAKERS}/players", params={"season": SEED_SEASON})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["team_id"] == LAKERS
+    assert body["season"] == SEED_SEASON
+    assert [(row["player_id"], row["ppg"]) for row in body["data"]] == [(LEBRON, 30.0)]
+
+
+def test_team_players_reject_unknown_team(client):
+    assert client.get("/api/teams/1/players", params={"season": SEED_SEASON}).status_code == 404
+
+
 def test_list_players_active_filter(client):
     r = client.get("/api/players", params={"active": "false"})
     assert r.status_code == 200
@@ -110,11 +155,41 @@ def test_player_season_averages(client):
     (row,) = r.json()
     assert row["season"] == SEED_SEASON
     assert row["games_played"] == 10
+    assert row["team_id"] == LAKERS
+    assert row["team_abbr"] == "LAL"
+    assert row["mpg"] == 36.5
     assert row["ppg"] == 30.0
 
 
 def test_player_stats_not_found(client):
     assert client.get("/api/players/1/stats").status_code == 404
+
+
+def test_player_game_log(client):
+    r = client.get(
+        f"/api/players/{LEBRON}/games",
+        params={"season": SEED_SEASON, "limit": 3},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 10
+    assert body["limit"] == 3
+    assert len(body["data"]) == 3
+    expected = {
+        "game_id": "0022400010",
+        "opponent_id": CELTICS,
+        "opponent_name": "Boston Celtics",
+        "opponent_abbr": "BOS",
+        "is_home": True,
+        "result": "W",
+        "team_score": 110,
+        "opponent_score": 100,
+    }
+    assert {key: body["data"][0][key] for key in expected} == expected
+
+
+def test_player_game_log_rejects_unknown_player(client):
+    assert client.get("/api/players/1/games", params={"season": SEED_SEASON}).status_code == 404
 
 
 def test_list_games_filtered_by_season_and_team(client):
