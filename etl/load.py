@@ -47,6 +47,83 @@ def read_clean_csv(filepath, game_id_column=None):
     return pd.read_csv(filepath, dtype=dtype)
 
 
+def migrate_legacy_game_ids(conn, official_game_ids):
+    """Replace pandas-truncated game IDs while preserving already-migrated data."""
+    mappings = sorted(
+        {
+            (game_id.lstrip("0") or "0", game_id)
+            for value in official_game_ids
+            if (game_id := str(value)) and game_id.lstrip("0") != game_id
+        }
+    )
+    if not mappings:
+        return
+
+    # Create canonical parent rows first so child foreign keys can be migrated.
+    # In a partially migrated database the canonical row wins conflicts; any
+    # child row that exists only under the legacy ID is copied across.
+    official_legacy = [(official, legacy) for legacy, official in mappings]
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO games (
+                id, game_date, season, home_team_id, away_team_id, home_score, away_score
+            )
+            SELECT %s, game_date, season, home_team_id, away_team_id, home_score, away_score
+            FROM games
+            WHERE id = %s
+            ON CONFLICT (id) DO NOTHING
+            """,
+            official_legacy,
+        )
+        cur.executemany(
+            """
+            INSERT INTO team_game_stats (
+                game_id, team_id, season, is_home,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            )
+            SELECT
+                %s, team_id, season, is_home,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            FROM team_game_stats
+            WHERE game_id = %s
+            ON CONFLICT (game_id, team_id) DO NOTHING
+            """,
+            official_legacy,
+        )
+        cur.executemany(
+            """
+            INSERT INTO player_game_stats (
+                game_id, player_id, team_id, season,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            )
+            SELECT
+                %s, player_id, team_id, season,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            FROM player_game_stats
+            WHERE game_id = %s
+            ON CONFLICT (game_id, player_id) DO NOTHING
+            """,
+            official_legacy,
+        )
+        legacy_only = [(legacy,) for legacy, _official in mappings]
+        cur.executemany("DELETE FROM player_game_stats WHERE game_id = %s", legacy_only)
+        cur.executemany("DELETE FROM team_game_stats WHERE game_id = %s", legacy_only)
+        cur.executemany("DELETE FROM games WHERE id = %s", legacy_only)
+
+
 def load_teams(conn):
     """Load teams from shared CSV."""
     print("\n=== Teams ===")
@@ -117,6 +194,7 @@ def load_games(conn, season):
 
     df = read_clean_csv(filepath, "id")
     df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date
+    migrate_legacy_game_ids(conn, df["id"].dropna())
 
     with conn.cursor() as cur:
         values = [

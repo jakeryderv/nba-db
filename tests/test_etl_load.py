@@ -142,6 +142,101 @@ def test_loaders_preserve_game_ids_and_update_existing_rows(
         assert cur.fetchone()[0] == 1
 
 
+def test_game_load_migrates_legacy_ids_and_merges_partially_migrated_stats(
+    etl_conn, tmp_path: Path, monkeypatch
+) -> None:
+    legacy_id = GAME_ID.lstrip("0")
+    monkeypatch.setattr(load, "BASE_CLEAN_DIR", str(tmp_path))
+    _write_csv(tmp_path, f"{SEASON}/games.csv", _game_row(home_score=125, away_score=120))
+
+    with etl_conn.cursor() as cur:
+        # Reproduce the old loader's truncated parent and child IDs.
+        cur.execute(
+            """
+            INSERT INTO games (
+                id, game_date, season, home_team_id, away_team_id, home_score, away_score
+            )
+            SELECT %s, game_date, season, home_team_id, away_team_id, home_score, away_score
+            FROM games WHERE id = %s
+            """,
+            (legacy_id, GAME_ID),
+        )
+        cur.execute(
+            "UPDATE team_game_stats SET game_id = %s WHERE game_id = %s", (legacy_id, GAME_ID)
+        )
+        cur.execute(
+            "UPDATE player_game_stats SET game_id = %s WHERE game_id = %s",
+            (legacy_id, GAME_ID),
+        )
+        cur.execute("DELETE FROM games WHERE id = %s", (GAME_ID,))
+
+        # Simulate a prior migration that created the canonical parent and only
+        # some canonical children before being interrupted.
+        cur.execute(
+            """
+            INSERT INTO games (
+                id, game_date, season, home_team_id, away_team_id, home_score, away_score
+            )
+            SELECT %s, game_date, season, home_team_id, away_team_id, home_score, away_score
+            FROM games WHERE id = %s
+            """,
+            (GAME_ID, legacy_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO team_game_stats (
+                game_id, team_id, season, is_home, points, rebounds, assists,
+                fgm, fga, fg3m, fg3a, ftm, fta
+            )
+            SELECT %s, team_id, season, is_home, 123, rebounds, assists,
+                   fgm, fga, fg3m, fg3a, ftm, fta
+            FROM team_game_stats WHERE game_id = %s AND team_id = %s
+            """,
+            (GAME_ID, legacy_id, LAKERS),
+        )
+        cur.execute(
+            """
+            INSERT INTO player_game_stats (
+                game_id, player_id, team_id, season, minutes, points, rebounds, assists,
+                fgm, fga, fg3m, fg3a, ftm, fta
+            )
+            SELECT %s, player_id, team_id, season, minutes, 99, rebounds, assists,
+                   fgm, fga, fg3m, fg3a, ftm, fta
+            FROM player_game_stats WHERE game_id = %s AND player_id = %s
+            """,
+            (GAME_ID, legacy_id, LEBRON),
+        )
+
+    load.load_games(etl_conn, SEASON)
+
+    with etl_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, home_score, away_score FROM games WHERE id IN (%s, %s)",
+            (GAME_ID, legacy_id),
+        )
+        assert cur.fetchall() == [(GAME_ID, 125, 120)]
+        cur.execute(
+            "SELECT team_id, points FROM team_game_stats WHERE game_id = %s ORDER BY team_id",
+            (GAME_ID,),
+        )
+        assert cur.fetchall() == [(CELTICS, 100), (LAKERS, 123)]
+        cur.execute(
+            "SELECT player_id, points FROM player_game_stats WHERE game_id = %s ORDER BY player_id",
+            (GAME_ID,),
+        )
+        assert cur.fetchall() == [(LEBRON, 99), (1628369, 25)]
+        cur.execute(
+            "SELECT COUNT(*) FROM team_game_stats WHERE game_id = %s",
+            (legacy_id,),
+        )
+        assert cur.fetchone()[0] == 0
+        cur.execute(
+            "SELECT COUNT(*) FROM player_game_stats WHERE game_id = %s",
+            (legacy_id,),
+        )
+        assert cur.fetchone()[0] == 0
+
+
 def test_load_season_rolls_back_all_changes_on_failure(
     etl_conn, tmp_path: Path, monkeypatch
 ) -> None:
