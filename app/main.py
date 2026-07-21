@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -13,8 +13,10 @@ from app.models import (
     GameBoxScore,
     GameDetail,
     GameList,
+    HeadToHeadSummary,
     LeaderList,
     Player,
+    PlayerComparison,
     PlayerGameLog,
     PlayerGameStats,
     PlayerGameStatsList,
@@ -23,6 +25,8 @@ from app.models import (
     Season,
     StatLeader,
     Team,
+    TeamComparison,
+    TeamComparisonEntry,
     TeamGameStats,
     TeamGameStatsList,
     TeamPlayerSummary,
@@ -127,6 +131,7 @@ def get_team_season_stats(
             WITH team_games AS (
                 SELECT
                     g.id,
+                    g.game_date,
                     g.home_team_id = %s AS is_home,
                     CASE WHEN g.home_team_id = %s THEN g.home_score ELSE g.away_score END
                         AS team_score,
@@ -135,6 +140,9 @@ def get_team_season_stats(
                 FROM games g
                 WHERE g.season = %s
                   AND (g.home_team_id = %s OR g.away_team_id = %s)
+            ), ranked_games AS (
+                SELECT *, ROW_NUMBER() OVER (ORDER BY game_date DESC NULLS LAST, id DESC) AS recency
+                FROM team_games
             )
             SELECT
                 %s AS team_id,
@@ -160,14 +168,25 @@ def get_team_season_stats(
                 ) AS away_losses,
                 ROUND(AVG(tgs.points), 1) AS ppg,
                 ROUND(AVG(otgs.points), 1) AS opponent_ppg,
+                ROUND(AVG(tg.team_score - tg.opponent_score), 1) AS point_diff,
+                COUNT(*) FILTER (
+                    WHERE tg.recency <= 10 AND tg.team_score > tg.opponent_score
+                ) AS last_10_wins,
+                COUNT(*) FILTER (
+                    WHERE tg.recency <= 10 AND tg.team_score < tg.opponent_score
+                ) AS last_10_losses,
                 ROUND(AVG(tgs.rebounds), 1) AS rpg,
                 ROUND(AVG(tgs.assists), 1) AS apg,
                 ROUND(AVG(tgs.steals), 1) AS spg,
                 ROUND(AVG(tgs.blocks), 1) AS bpg,
                 ROUND(SUM(tgs.fgm)::NUMERIC / NULLIF(SUM(tgs.fga), 0), 3) AS fg_pct,
                 ROUND(SUM(tgs.fg3m)::NUMERIC / NULLIF(SUM(tgs.fg3a), 0), 3) AS fg3_pct,
-                ROUND(SUM(tgs.ftm)::NUMERIC / NULLIF(SUM(tgs.fta), 0), 3) AS ft_pct
-            FROM team_games tg
+                ROUND(SUM(tgs.ftm)::NUMERIC / NULLIF(SUM(tgs.fta), 0), 3) AS ft_pct,
+                ROUND(
+                    (SUM(tgs.fgm) + 0.5 * SUM(tgs.fg3m))::NUMERIC
+                    / NULLIF(SUM(tgs.fga), 0), 3
+                ) AS efg_pct
+            FROM ranked_games tg
             JOIN team_game_stats tgs ON tgs.game_id = tg.id AND tgs.team_id = %s
             JOIN team_game_stats otgs ON otgs.game_id = tg.id AND otgs.team_id <> %s
             """,
@@ -378,6 +397,86 @@ def get_player_games(
             (player_id, season, limit, offset),
         )
         return PlayerGameLog(data=cur.fetchall(), total=total, limit=limit, offset=offset)
+
+
+# === Comparisons ===
+
+
+def _comparison_pair(values: list[int], label: str) -> tuple[int, int]:
+    if len(values) != 2 or values[0] == values[1]:
+        raise HTTPException(status_code=422, detail=f"Provide exactly two distinct {label}")
+    return values[0], values[1]
+
+
+@app.get("/api/comparisons/players", response_model=PlayerComparison, tags=["Comparisons"])
+def compare_players(
+    player_ids: Annotated[list[int], Query(description="Exactly two distinct player IDs")],
+    season: Annotated[str, Query(description="Season (required)")],
+) -> PlayerComparison:
+    first_id, second_id = _comparison_pair(player_ids, "player IDs")
+    compared: list[PlayerSeasonAvg] = []
+    for player_id in (first_id, second_id):
+        season_stats = next(
+            (row for row in get_player_stats(player_id) if row.season == season), None
+        )
+        if season_stats is None:
+            raise HTTPException(status_code=404, detail="Player has no stats for this season")
+        compared.append(season_stats)
+    return PlayerComparison(season=season, data=compared)
+
+
+@app.get("/api/comparisons/teams", response_model=TeamComparison, tags=["Comparisons"])
+def compare_teams(
+    team_ids: Annotated[list[int], Query(description="Exactly two distinct team IDs")],
+    season: Annotated[str, Query(description="Season (required)")],
+) -> TeamComparison:
+    first_id, second_id = _comparison_pair(team_ids, "team IDs")
+    entries = [
+        TeamComparisonEntry(team=get_team(team_id), stats=get_team_season_stats(team_id, season))
+        for team_id in (first_id, second_id)
+    ]
+
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) AS games_played,
+                COUNT(*) FILTER (
+                    WHERE (home_team_id = %s AND home_score > away_score)
+                       OR (away_team_id = %s AND away_score > home_score)
+                ) AS first_team_wins,
+                COUNT(*) FILTER (
+                    WHERE (home_team_id = %s AND home_score > away_score)
+                       OR (away_team_id = %s AND away_score > home_score)
+                ) AS second_team_wins,
+                COALESCE(ROUND(AVG(
+                    CASE WHEN home_team_id = %s THEN home_score ELSE away_score END
+                ), 1), 0) AS first_team_ppg,
+                COALESCE(ROUND(AVG(
+                    CASE WHEN home_team_id = %s THEN home_score ELSE away_score END
+                ), 1), 0) AS second_team_ppg
+            FROM games
+            WHERE season = %s
+              AND ((home_team_id = %s AND away_team_id = %s)
+                OR (home_team_id = %s AND away_team_id = %s))
+            """,
+            (
+                first_id,
+                first_id,
+                second_id,
+                second_id,
+                first_id,
+                second_id,
+                season,
+                first_id,
+                second_id,
+                second_id,
+                first_id,
+            ),
+        )
+        head_to_head = HeadToHeadSummary(**cur.fetchone())
+
+    return TeamComparison(season=season, data=entries, head_to_head=head_to_head)
 
 
 # === Games ===
@@ -610,48 +709,63 @@ def get_leaders(
 
     with get_cursor() as cur:
         cur.execute(
+            """
+            SELECT COALESCE(CEIL(MAX(games_played) * 0.7), 0)::INTEGER AS minimum_games
+            FROM (
+                SELECT team_id, COUNT(*) AS games_played
+                FROM team_game_stats
+                WHERE season = %s
+                GROUP BY team_id
+            ) team_seasons
+            """,
+            (season,),
+        )
+        minimum_games = cur.fetchone()["minimum_games"]
+        cur.execute(
             f"""
             WITH player_stats AS (
                 SELECT
                     pgs.player_id,
-                    COUNT(*) as games_played,
-                    ROUND(AVG(pgs.{stat_column}), 1) as value,
-                    MAX(pgs.game_id) as last_game_id
+                    COUNT(*) AS games_played,
+                    ROUND(AVG(pgs.{stat_column}), 1) AS value
                 FROM player_game_stats pgs
-                WHERE pgs.season = %s
+                WHERE pgs.season = %s AND pgs.minutes IS NOT NULL
                 GROUP BY pgs.player_id
-                HAVING COUNT(*) >= 10
+                HAVING COUNT(*) >= %s
             ),
             player_last_team AS (
-                SELECT pgs.player_id, t.abbreviation as team_abbr
+                SELECT DISTINCT ON (pgs.player_id)
+                    pgs.player_id, t.abbreviation AS team_abbr
                 FROM player_game_stats pgs
+                JOIN games g ON g.id = pgs.game_id
                 JOIN teams t ON pgs.team_id = t.id
-                WHERE pgs.season = %s
-                  AND pgs.game_id = (
-                      SELECT MAX(pgs2.game_id)
-                      FROM player_game_stats pgs2
-                      WHERE pgs2.player_id = pgs.player_id AND pgs2.season = %s
-                  )
-                GROUP BY pgs.player_id, t.abbreviation
+                WHERE pgs.season = %s AND pgs.minutes IS NOT NULL
+                ORDER BY pgs.player_id, g.game_date DESC NULLS LAST, g.id DESC
             )
             SELECT
+                RANK() OVER (ORDER BY ps.value DESC) AS rank,
                 ps.player_id,
-                p.full_name as player_name,
+                p.full_name AS player_name,
                 plt.team_abbr,
                 ps.games_played,
                 ps.value
             FROM player_stats ps
             JOIN players p ON ps.player_id = p.id
             JOIN player_last_team plt ON ps.player_id = plt.player_id
-            ORDER BY ps.value DESC
+            ORDER BY ps.value DESC, ps.games_played DESC, p.full_name, ps.player_id
             LIMIT %s
             """,
-            (season, season, season, limit),
+            (season, minimum_games, season, limit),
         )
         rows = cur.fetchall()
 
-        leaders = [StatLeader(rank=i + 1, **row) for i, row in enumerate(rows)]
-        return LeaderList(stat=stat, season=season, data=leaders)
+        leaders = [StatLeader(**row) for row in rows]
+        return LeaderList(
+            stat=stat,
+            season=season,
+            minimum_games=minimum_games,
+            data=leaders,
+        )
 
 
 # === Standings ===
@@ -674,7 +788,7 @@ def get_standings(season: str = Query(..., description="Season (required)")) -> 
             FROM teams t
             JOIN games g ON (t.id = g.home_team_id OR t.id = g.away_team_id) AND g.season = %s
             GROUP BY t.id, t.full_name, t.abbreviation
-            ORDER BY wins DESC
+            ORDER BY wins DESC, losses ASC, t.full_name, t.id
             """,
             (season, season),
         )

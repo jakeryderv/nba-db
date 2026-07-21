@@ -37,12 +37,14 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | `GET /api/players/{id}` | Player by ID |
 | `GET /api/players/{id}/stats` | Player season averages |
 | `GET /api/players/{id}/games` | Paginated player game log |
+| `GET /api/comparisons/players` | Compare exactly two players for a season |
+| `GET /api/comparisons/teams` | Compare two teams, including head-to-head results |
 | `GET /api/games` | Games (filter by `?season=`, `?team_id=`) |
 | `GET /api/games/{id}` | Game by ID |
 | `GET /api/games/{id}/boxscore` | Full box score |
 | `GET /api/team-game-stats` | Team box-score lines (by season) |
 | `GET /api/player-game-stats` | Player box-score lines (by season) |
-| `GET /api/leaders/{stat}` | Stat leaders (points, rebounds, assists, steals, blocks) |
+| `GET /api/leaders/{stat}` | Qualified stat leaders (points, rebounds, assists, steals, blocks) |
 | `GET /api/standings` | League standings (`?season=` required) |
 
 ```bash
