@@ -160,22 +160,27 @@ def test_player_stats_reference_valid_games(conn):
 
 
 def test_game_scores_match_team_stats(conn):
-    """Game scores should match team stats points."""
-    mismatches = run_query(
+    """Both game scores should match their corresponding team stats rows."""
+    mismatch_count = run_scalar(
         conn,
         """
-        SELECT g.id, g.home_score, tgs.points
+        SELECT COUNT(*)
         FROM games g
-        JOIN team_game_stats tgs ON g.id = tgs.game_id AND g.home_team_id = tgs.team_id
-        WHERE g.home_score != tgs.points
-        LIMIT 5
+        CROSS JOIN LATERAL (
+            VALUES
+                (g.home_team_id, g.home_score),
+                (g.away_team_id, g.away_score)
+        ) AS expected(team_id, points)
+        LEFT JOIN team_game_stats tgs
+            ON tgs.game_id = g.id AND tgs.team_id = expected.team_id
+        WHERE tgs.points IS DISTINCT FROM expected.points
     """,
     )
-    passed = len(mismatches) == 0
+    passed = mismatch_count == 0
     return TestResult(
         "Game scores match team stats",
         passed,
-        f"Found {len(mismatches)} mismatches" if mismatches else "All scores match",
+        f"Found {mismatch_count} mismatches" if mismatch_count else "All scores match",
     )
 
 

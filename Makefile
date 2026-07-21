@@ -118,14 +118,14 @@ test-data:
 	PYTHONPATH=. uv run python db/tests/test_data_quality.py
 
 lint:
-	uv run ruff check etl/ app/ db/ tests/
+	uv run ruff check etl/ app/ db/ scripts/ tests/
 
 format:
-	uv run ruff format etl/ app/ db/ tests/
-	uv run ruff check --fix etl/ app/ db/ tests/
+	uv run ruff format etl/ app/ db/ scripts/ tests/
+	uv run ruff check --fix etl/ app/ db/ scripts/ tests/
 
 typecheck:
-	uv run mypy etl/ app/ db/
+	uv run mypy etl/ app/ db/ scripts/
 
 # API
 api:
