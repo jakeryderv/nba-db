@@ -65,3 +65,29 @@ def test_zero_values_are_not_coalesced_to_missing_markers() -> None:
 
     for field in ("ppg", "rpg", "apg", "spg", "bpg", "games_played", "wins", "losses"):
         assert f"{field} || '-'" not in html
+
+
+def test_single_loaded_season_is_presented_as_a_label() -> None:
+    html = TEMPLATE.read_text()
+
+    assert 'id="season-label"' in html
+    assert 'id="season-select"' not in html
+    assert "`${season} Regular Season`" in html
+
+
+def test_detail_views_have_linkable_hash_routes() -> None:
+    html = TEMPLATE.read_text()
+
+    assert "window.addEventListener('hashchange', route)" in html
+    for detail in ("team", "player", "game"):
+        assert f'href="#{detail}/${{encodeURIComponent(' in html
+
+
+def test_detail_dialogs_expose_accessible_names() -> None:
+    html = TEMPLATE.read_text()
+
+    assert html.count('role="dialog"') == 3
+    assert html.count('aria-modal="true"') == 3
+    assert 'aria-label="Close player profile"' in html
+    assert 'aria-label="Close game box score"' in html
+    assert 'aria-label="Close team dashboard"' in html

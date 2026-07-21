@@ -72,28 +72,21 @@
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        .season-selector {
+        .season-display {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-        }
-        .season-selector label {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-        .season-selector select {
-            padding: 0.5rem 1rem;
+            padding: 0.5rem 0.8rem;
             background: var(--bg-tertiary);
-            color: var(--text);
             border: 1px solid var(--border);
             border-radius: 8px;
             font-size: 0.9rem;
             font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
         }
-        .season-selector select:hover {
-            border-color: var(--accent);
+        .season-display-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 500;
         }
 
         /* Navigation */
@@ -342,8 +335,13 @@
             cursor: pointer;
             color: var(--accent-blue);
             transition: color 0.2s;
+            background: none;
+            border: 0;
+            padding: 0;
+            font: inherit;
+            text-decoration: none;
         }
-        .clickable:hover {
+        .clickable:hover, .clickable:focus-visible {
             color: var(--accent);
             text-decoration: underline;
         }
@@ -408,16 +406,20 @@
 
         /* Game Cards */
         .game-card {
+            display: block;
             background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 1rem;
             cursor: pointer;
             transition: all 0.2s;
+            color: var(--text);
+            text-decoration: none;
         }
-        .game-card:hover {
+        .game-card:hover, .game-card:focus-visible {
             border-color: var(--accent);
             transform: translateY(-2px);
+            outline: none;
         }
         .game-card-date {
             font-size: 0.8rem;
@@ -498,6 +500,9 @@
         .modal-overlay.active {
             display: flex;
         }
+        body.modal-open {
+            overflow: hidden;
+        }
         .modal {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
@@ -548,7 +553,18 @@
             padding: 1.5rem;
             overflow-y: auto;
         }
-
+        .detail-columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1.5rem;
+        }
+        .detail-section + .detail-section {
+            margin-top: 1.5rem;
+        }
+        .detail-meta {
+            color: var(--text-muted);
+            margin: -0.5rem 0 1.5rem;
+        }
         /* Stats Display */
         .stats-grid {
             display: grid;
@@ -679,6 +695,17 @@
             .game-score-vs {
                 display: none;
             }
+            .detail-columns {
+                grid-template-columns: 1fr;
+            }
+            .modal-overlay {
+                padding: 0;
+            }
+            .modal {
+                max-height: 100vh;
+                min-height: 100vh;
+                border-radius: 0;
+            }
         }
     </style>
 </head>
@@ -689,9 +716,9 @@
                 <div class="logo-icon">N</div>
                 <div class="logo-text">NBA Stats</div>
             </div>
-            <div class="season-selector">
-                <label>Season:</label>
-                <select id="season-select"></select>
+            <div class="season-display" aria-label="Loaded dataset">
+                <span class="season-display-label">Dataset</span>
+                <span id="season-label">Loading…</span>
             </div>
         </div>
     </header>
@@ -796,41 +823,42 @@
     </main>
 
     <!-- Player Modal -->
-    <div class="modal-overlay" id="player-modal">
-        <div class="modal">
+    <div class="modal-overlay" id="player-modal" role="dialog" aria-modal="true" aria-labelledby="player-modal-title" aria-hidden="true">
+        <div class="modal" tabindex="-1">
             <div class="modal-header">
                 <span class="modal-title" id="player-modal-title"></span>
-                <button class="modal-close" data-action="close-modal" data-modal="player-modal">&times;</button>
+                <button class="modal-close" data-action="close-modal" aria-label="Close player profile">&times;</button>
             </div>
             <div class="modal-body" id="player-modal-body"></div>
         </div>
     </div>
 
     <!-- Game Modal -->
-    <div class="modal-overlay" id="game-modal">
-        <div class="modal">
+    <div class="modal-overlay" id="game-modal" role="dialog" aria-modal="true" aria-labelledby="game-modal-title" aria-hidden="true">
+        <div class="modal" tabindex="-1">
             <div class="modal-header">
                 <span class="modal-title" id="game-modal-title"></span>
-                <button class="modal-close" data-action="close-modal" data-modal="game-modal">&times;</button>
+                <button class="modal-close" data-action="close-modal" aria-label="Close game box score">&times;</button>
             </div>
             <div class="modal-body" id="game-modal-body"></div>
         </div>
     </div>
 
     <!-- Team Modal -->
-    <div class="modal-overlay" id="team-modal">
-        <div class="modal">
+    <div class="modal-overlay" id="team-modal" role="dialog" aria-modal="true" aria-labelledby="team-modal-title" aria-hidden="true">
+        <div class="modal" tabindex="-1">
             <div class="modal-header">
                 <span class="modal-title" id="team-modal-title"></span>
-                <button class="modal-close" data-action="close-modal" data-modal="team-modal">&times;</button>
+                <button class="modal-close" data-action="close-modal" aria-label="Close team dashboard">&times;</button>
             </div>
             <div class="modal-body" id="team-modal-body"></div>
         </div>
     </div>
 
     <script>
-        let season = '2024-25', teams = [];
+        let season = null, teams = [], ready = false, activeSection = 'standings';
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
+        const sections = new Set(['standings', 'leaders', 'games', 'players']);
 
         const HTML_ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
 
@@ -856,6 +884,7 @@
             const status = document.createElement('div');
             status.className = kind;
             status.textContent = message;
+            status.setAttribute('role', kind === 'error' ? 'alert' : 'status');
             container.replaceChildren(status);
         }
 
@@ -868,10 +897,6 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
-            document.querySelectorAll('.nav-link').forEach(a =>
-                a.onclick = e => { e.preventDefault(); switchTo(a.dataset.section); }
-            );
-
             let searchTimeout;
             document.getElementById('player-search').oninput = () => {
                 clearTimeout(searchTimeout);
@@ -882,38 +907,29 @@
             document.getElementById('games-sort').onchange = loadGames;
             document.getElementById('leaders-stat').onchange = loadLeaders;
 
-            document.querySelectorAll('.modal-overlay').forEach(m =>
-                m.onclick = e => { if(e.target === m) m.classList.remove('active'); }
-            );
+            document.querySelectorAll('.modal-overlay').forEach(m => {
+                m.onclick = e => { if(e.target === m) closeDetail(); };
+            });
             document.onkeydown = e => {
-                if(e.key === 'Escape') document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+                if(e.key === 'Escape' && document.querySelector('.modal-overlay.active')) closeDetail();
             };
+            window.addEventListener('hashchange', route);
 
             document.addEventListener('click', e => {
                 const target = e.target.closest('[data-action]');
                 if (!target) return;
                 const actions = {
-                    player: () => openPlayer(target.dataset.id),
-                    game: () => openGame(target.dataset.id),
-                    team: () => openTeam(target.dataset.id),
                     paginate: () => paginate(target.dataset.key, Number(target.dataset.direction)),
-                    'close-modal': () => closeModal(target.dataset.modal)
+                    'close-modal': () => closeDetail()
                 };
                 actions[target.dataset.action]?.();
             });
 
             try {
                 const seasons = await api('/api/seasons');
-                if (seasons.length) season = seasons[0].id;
-                const seasonSelect = document.getElementById('season-select');
-                seasonSelect.replaceChildren(...seasons.map(s => {
-                    const option = document.createElement('option');
-                    option.value = s.id;
-                    option.textContent = s.id;
-                    option.selected = s.id === season;
-                    return option;
-                }));
-                seasonSelect.onchange = e => { season = e.target.value; loadSection(); };
+                if (!seasons.length) throw new Error('No season is loaded');
+                season = seasons[0].id;
+                document.getElementById('season-label').textContent = `${season} Regular Season`;
 
                 teams = await api('/api/teams');
                 const teamSelect = document.getElementById('games-team');
@@ -927,8 +943,11 @@
                     return option;
                 }));
 
-                loadStandings();
+                ready = true;
+                if (!window.location.hash) history.replaceState(null, '', '#standings');
+                route();
             } catch (error) {
+                document.getElementById('season-label').textContent = 'Unavailable';
                 showError(document.getElementById('standings-table'), 'application', error);
             }
         });
@@ -937,6 +956,28 @@
             const r = await fetch(url);
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return r.json();
+        }
+
+        function parseRoute() {
+            const [kind, id] = window.location.hash.slice(1).split('/');
+            return {kind: kind || 'standings', id: id ? decodeURIComponent(id) : null};
+        }
+
+        function route() {
+            if (!ready) return;
+            const {kind, id} = parseRoute();
+            if (sections.has(kind)) {
+                activeSection = kind;
+                closeModals();
+                switchTo(kind);
+                return;
+            }
+            if (id && ({player: openPlayer, game: openGame, team: openTeam})[kind]) {
+                ({player: openPlayer, game: openGame, team: openTeam})[kind](id);
+                return;
+            }
+            history.replaceState(null, '', `#${activeSection}`);
+            route();
         }
 
         function switchTo(s) {
@@ -960,7 +1001,7 @@
                     <tbody>${d.map((t, i) => `
                         <tr>
                             <td><span class="standings-rank ${i < 10 ? 'playoff' : ''}">${i + 1}</span></td>
-                            <td><span class="clickable" data-action="team" data-id="${h(t.team_id)}">${h(t.team_name)}</span></td>
+                            <td><a class="clickable" href="#team/${encodeURIComponent(t.team_id)}" data-action="team">${h(t.team_name)}</a></td>
                             <td class="num" style="color: var(--accent-green); font-weight: 600;">${h(present(t.wins))}</td>
                             <td class="num">${h(present(t.losses))}</td>
                             <td class="num" style="font-weight: 600;">${h(pct(t.win_pct))}</td>
@@ -982,7 +1023,7 @@
                     <div class="stat-card">
                         <div class="stat-card-header">
                             <div>
-                                <div class="stat-card-name" data-action="player" data-id="${h(p.player_id)}">${h(p.player_name)}</div>
+                                <a class="stat-card-name clickable" href="#player/${encodeURIComponent(p.player_id)}" data-action="player">${h(p.player_name)}</a>
                                 <div class="stat-card-team">${h(p.team_abbr)} &middot; ${h(present(p.games_played))} GP</div>
                             </div>
                             <div class="stat-card-rank ${p.rank <= 3 ? 'top3' : ''}">${h(present(p.rank))}</div>
@@ -1009,7 +1050,7 @@
                 c.innerHTML = d.data.map(g => {
                     const homeWin = g.home_score > g.away_score;
                     return `
-                        <div class="game-card" data-action="game" data-id="${h(g.id)}">
+                        <a class="game-card" href="#game/${encodeURIComponent(g.id)}" data-action="game">
                             <div class="game-card-date">${h(present(g.game_date, 'TBD'))}</div>
                             <div class="game-card-teams">
                                 <div class="game-team-row ${!homeWin ? 'winner' : ''}">
@@ -1021,7 +1062,7 @@
                                     <span class="game-team-score">${h(present(g.home_score))}</span>
                                 </div>
                             </div>
-                        </div>
+                        </a>
                     `;
                 }).join('');
                 renderPagination('games');
@@ -1045,7 +1086,7 @@
                     <thead><tr><th>Player</th><th>Status</th></tr></thead>
                     <tbody>${d.data.map(p => `
                         <tr>
-                            <td><span class="clickable" data-action="player" data-id="${h(p.id)}">${h(p.full_name)}</span></td>
+                            <td><a class="clickable" href="#player/${encodeURIComponent(p.id)}" data-action="player">${h(p.full_name)}</a></td>
                             <td><span class="badge badge-${p.is_active ? 'active' : 'inactive'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
                         </tr>
                     `).join('')}</tbody>
@@ -1071,33 +1112,56 @@
             ({players: () => loadPlayers(false), games: () => loadGames(false)})[key]();
         }
 
-        function closeModal(id) {
-            document.getElementById(id).classList.remove('active');
+        function closeModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('active');
+                modal.setAttribute('aria-hidden', 'true');
+            });
+            document.body.classList.remove('modal-open');
+        }
+
+        function showModal(id) {
+            closeModals();
+            const modal = document.getElementById(id);
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('modal-open');
+            modal.querySelector('.modal-close').focus();
+        }
+
+        function closeDetail() {
+            window.location.hash = activeSection;
         }
 
         async function openPlayer(id) {
             const m = document.getElementById('player-modal');
             const b = document.getElementById('player-modal-body');
-            m.classList.add('active');
+            showModal(m.id);
             showLoading(b, 'player');
             try {
-                const [p, stats] = await Promise.all([
+                const [p, stats, games] = await Promise.all([
                     api(`/api/players/${encodeURIComponent(id)}`),
-                    api(`/api/players/${encodeURIComponent(id)}/stats`).catch(() => [])
+                    api(`/api/players/${encodeURIComponent(id)}/stats`).catch(() => []),
+                    api(`/api/players/${encodeURIComponent(id)}/games?${new URLSearchParams({season, limit: 10})}`)
                 ]);
                 document.getElementById('player-modal-title').textContent = p.full_name;
                 const cur = stats.find(s => s.season === season);
                 b.innerHTML = `
+                    <p class="detail-meta">
+                        ${cur ? `<a class="clickable" href="#team/${encodeURIComponent(cur.team_id)}" data-action="team">${h(cur.team_abbr)}</a> &middot; ` : ''}
+                        ${p.is_active ? 'Active' : 'Inactive'} &middot; ${h(season)} Regular Season
+                    </p>
                     <div class="stats-grid">
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.ppg))}</div><div class="stat-box-label">PPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.rpg))}</div><div class="stat-box-label">RPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.apg))}</div><div class="stat-box-label">APG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.spg))}</div><div class="stat-box-label">SPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.bpg))}</div><div class="stat-box-label">BPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.mpg))}</div><div class="stat-box-label">MPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.games_played))}</div><div class="stat-box-label">GP</div></div>
                     </div>
                     ${stats.length ? `
-                        <h3 class="section-subtitle">Career Statistics</h3>
+                        <h3 class="section-subtitle">Season Statistics</h3>
                         <div class="table-container"><div class="table-scroll">
                             <table>
                                 <thead><tr><th>Season</th><th>GP</th><th>PPG</th><th>RPG</th><th>APG</th><th>FG%</th><th>3P%</th><th>FT%</th></tr></thead>
@@ -1116,14 +1180,39 @@
                             </table>
                         </div></div>
                     ` : '<p style="color:var(--text-muted);text-align:center;padding:2rem;">No statistics available</p>'}
+                    <div class="detail-section">
+                        <h3 class="section-subtitle">Recent Games</h3>
+                        ${playerGameLogTable(games.data)}
+                    </div>
                 `;
             } catch(e) { showError(b, 'player', e); }
+        }
+
+        function playerGameLogTable(games) {
+            if (!games.length) return '<p class="detail-meta">No games available.</p>';
+            return `<div class="table-container"><div class="table-scroll"><table>
+                <thead><tr><th>Date</th><th>Matchup</th><th>Result</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>FG</th><th>3PT</th><th>+/-</th></tr></thead>
+                <tbody>${games.map(g => `
+                    <tr>
+                        <td><a class="clickable" href="#game/${encodeURIComponent(g.game_id)}" data-action="game">${h(present(g.game_date))}</a></td>
+                        <td>${g.is_home ? 'vs' : '@'} ${h(g.opponent_abbr)}</td>
+                        <td><span class="badge badge-${g.result === 'W' ? 'win' : 'loss'}">${h(g.result)} ${h(g.team_score)}-${h(g.opponent_score)}</span></td>
+                        <td class="num">${h(present(g.minutes))}</td>
+                        <td class="num" style="font-weight:600;">${h(present(g.points))}</td>
+                        <td class="num">${h(present(g.rebounds))}</td>
+                        <td class="num">${h(present(g.assists))}</td>
+                        <td class="num">${h(g.fgm)}-${h(g.fga)}</td>
+                        <td class="num">${h(g.fg3m)}-${h(g.fg3a)}</td>
+                        <td class="num">${g.plus_minus > 0 ? '+' : ''}${h(present(g.plus_minus, 0))}</td>
+                    </tr>
+                `).join('')}</tbody>
+            </table></div></div>`;
         }
 
         async function openGame(id) {
             const m = document.getElementById('game-modal');
             const b = document.getElementById('game-modal-body');
-            m.classList.add('active');
+            showModal(m.id);
             showLoading(b, 'game');
             try {
                 const d = await api(`/api/games/${encodeURIComponent(id)}/boxscore`);
@@ -1135,12 +1224,12 @@
                         <div class="game-score-date">${h(present(g.game_date, ''))}</div>
                         <div class="game-score-teams">
                             <div class="game-score-team">
-                                <div class="game-score-team-name">${h(g.away_team)}</div>
+                                <a class="game-score-team-name clickable" href="#team/${encodeURIComponent(g.away_team_id)}" data-action="team">${h(g.away_team)}</a>
                                 <div class="game-score-team-score ${!homeWin ? 'winner' : ''}">${h(present(g.away_score))}</div>
                             </div>
                             <div class="game-score-vs">-</div>
                             <div class="game-score-team">
-                                <div class="game-score-team-name">${h(g.home_team)}</div>
+                                <a class="game-score-team-name clickable" href="#team/${encodeURIComponent(g.home_team_id)}" data-action="team">${h(g.home_team)}</a>
                                 <div class="game-score-team-score ${homeWin ? 'winner' : ''}">${h(present(g.home_score))}</div>
                             </div>
                         </div>
@@ -1158,7 +1247,7 @@
                 <thead><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FG</th><th>3PT</th><th>FT</th><th>+/-</th></tr></thead>
                 <tbody>${players.map(p => `
                     <tr>
-                        <td><span class="clickable" data-action="player" data-id="${h(p.player_id)}">${h(p.player_name)}</span></td>
+                        <td><a class="clickable" href="#player/${encodeURIComponent(p.player_id)}" data-action="player">${h(p.player_name)}</a></td>
                         <td class="num">${h(p.minutes === null || p.minutes === undefined ? '-' : Math.round(Number(p.minutes)))}</td>
                         <td class="num" style="${p.points >= 20 ? 'color:var(--accent);font-weight:600;' : ''}">${h(present(p.points))}</td>
                         <td class="num" style="${p.rebounds >= 10 ? 'color:var(--accent-blue);font-weight:600;' : ''}">${h(present(p.rebounds))}</td>
@@ -1177,46 +1266,82 @@
         async function openTeam(id) {
             const m = document.getElementById('team-modal');
             const b = document.getElementById('team-modal-body');
-            m.classList.add('active');
+            showModal(m.id);
             showLoading(b, 'team');
             try {
-                const [t, games, standings] = await Promise.all([
+                const [t, summary, players, games] = await Promise.all([
                     api(`/api/teams/${encodeURIComponent(id)}`),
-                    api(`/api/games?${new URLSearchParams({season, team_id: id, limit: 10})}`),
-                    api(`/api/standings?${new URLSearchParams({season})}`)
+                    api(`/api/teams/${encodeURIComponent(id)}/stats?${new URLSearchParams({season})}`),
+                    api(`/api/teams/${encodeURIComponent(id)}/players?${new URLSearchParams({season, limit: 12})}`),
+                    api(`/api/games?${new URLSearchParams({season, team_id: id, limit: 10})}`)
                 ]);
-                const s = standings.find(x => String(x.team_id) === String(id));
-                const rank = standings.findIndex(x => String(x.team_id) === String(id)) + 1;
                 document.getElementById('team-modal-title').textContent = t.full_name;
                 b.innerHTML = `
+                    <p class="detail-meta">${h(t.city)}, ${h(t.state)} &middot; Founded ${h(present(t.year_founded))} &middot; ${h(season)} Regular Season</p>
                     <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-box-value">${h(present(s?.wins))}</div><div class="stat-box-label">Wins</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${h(present(s?.losses))}</div><div class="stat-box-label">Losses</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${h(s ? pct(s.win_pct) : '-')}</div><div class="stat-box-label">Win%</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${rank > 0 ? `#${rank}` : '-'}</div><div class="stat-box-label">Rank</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(summary.wins)}-${h(summary.losses)}</div><div class="stat-box-label">Record</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(pct(summary.win_pct))}</div><div class="stat-box-label">Win%</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(summary.ppg)}</div><div class="stat-box-label">PPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(summary.opponent_ppg)}</div><div class="stat-box-label">Opp PPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(summary.rpg)}</div><div class="stat-box-label">RPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(summary.apg)}</div><div class="stat-box-label">APG</div></div>
                     </div>
-                    <p style="color:var(--text-muted);margin-bottom:1.5rem;">${h(t.city)}, ${h(t.state)} &middot; Founded ${h(present(t.year_founded))}</p>
-                    <h3 class="section-subtitle">Recent Games</h3>
-                    <div class="table-container"><div class="table-scroll"><table>
-                        <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th></tr></thead>
-                        <tbody>${games.data.map(g => {
-                            const home = String(g.home_team_id) === String(id);
-                            const opp = home ? g.away_team : g.home_team;
-                            const ts = home ? g.home_score : g.away_score;
-                            const os = home ? g.away_score : g.home_score;
-                            const win = ts > os;
-                            return `
-                                <tr style="cursor:pointer;" data-action="game" data-id="${h(g.id)}">
-                                    <td>${h(present(g.game_date))}</td>
-                                    <td>${home ? 'vs' : '@'} ${h(opp)}</td>
-                                    <td><span class="badge badge-${win ? 'win' : 'loss'}">${win ? 'W' : 'L'}</span></td>
-                                    <td class="num" style="font-weight:600;">${h(present(ts))}-${h(present(os))}</td>
-                                </tr>
-                            `;
-                        }).join('')}</tbody>
-                    </table></div></div>
+                    <div class="detail-columns">
+                        <section>
+                            <h3 class="section-subtitle">Team Profile</h3>
+                            <div class="table-container"><div class="table-scroll"><table>
+                                <tbody>
+                                    <tr><th>Home</th><td class="num">${h(summary.home_wins)}-${h(summary.home_losses)}</td></tr>
+                                    <tr><th>Away</th><td class="num">${h(summary.away_wins)}-${h(summary.away_losses)}</td></tr>
+                                    <tr><th>FG%</th><td class="num">${h(pct(summary.fg_pct))}</td></tr>
+                                    <tr><th>3P%</th><td class="num">${h(pct(summary.fg3_pct))}</td></tr>
+                                    <tr><th>FT%</th><td class="num">${h(pct(summary.ft_pct))}</td></tr>
+                                </tbody>
+                            </table></div></div>
+                        </section>
+                        <section>
+                            <h3 class="section-subtitle">Player Leaders</h3>
+                            <div class="table-container"><div class="table-scroll"><table>
+                                <thead><tr><th>Player</th><th>GP</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th></tr></thead>
+                                <tbody>${players.data.map(p => `
+                                    <tr>
+                                        <td><a class="clickable" href="#player/${encodeURIComponent(p.player_id)}" data-action="player">${h(p.player_name)}</a></td>
+                                        <td class="num">${h(p.games_played)}</td>
+                                        <td class="num">${h(present(p.mpg))}</td>
+                                        <td class="num" style="font-weight:600;">${h(p.ppg)}</td>
+                                        <td class="num">${h(p.rpg)}</td>
+                                        <td class="num">${h(p.apg)}</td>
+                                    </tr>
+                                `).join('')}</tbody>
+                            </table></div></div>
+                        </section>
+                    </div>
+                    <div class="detail-section">
+                        <h3 class="section-subtitle">Recent Games</h3>
+                        ${teamGameTable(games.data, id)}
+                    </div>
                 `;
             } catch(e) { showError(b, 'team', e); }
+        }
+
+        function teamGameTable(games, teamId) {
+            return `<div class="table-container"><div class="table-scroll"><table>
+                <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th></tr></thead>
+                <tbody>${games.map(g => {
+                    const home = String(g.home_team_id) === String(teamId);
+                    const opponent = home ? g.away_team : g.home_team;
+                    const teamScore = home ? g.home_score : g.away_score;
+                    const opponentScore = home ? g.away_score : g.home_score;
+                    const win = teamScore > opponentScore;
+                    return `
+                        <tr>
+                            <td><a class="clickable" href="#game/${encodeURIComponent(g.id)}" data-action="game">${h(present(g.game_date))}</a></td>
+                            <td>${home ? 'vs' : '@'} ${h(opponent)}</td>
+                            <td><span class="badge badge-${win ? 'win' : 'loss'}">${win ? 'W' : 'L'}</span></td>
+                            <td class="num" style="font-weight:600;">${h(teamScore)}-${h(opponentScore)}</td>
+                        </tr>`;
+                }).join('')}</tbody>
+            </table></div></div>`;
         }
 
     </script>
