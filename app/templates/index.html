@@ -800,7 +800,7 @@
         <div class="modal">
             <div class="modal-header">
                 <span class="modal-title" id="player-modal-title"></span>
-                <button class="modal-close" onclick="closeModal('player-modal')">&times;</button>
+                <button class="modal-close" data-action="close-modal" data-modal="player-modal">&times;</button>
             </div>
             <div class="modal-body" id="player-modal-body"></div>
         </div>
@@ -811,7 +811,7 @@
         <div class="modal">
             <div class="modal-header">
                 <span class="modal-title" id="game-modal-title"></span>
-                <button class="modal-close" onclick="closeModal('game-modal')">&times;</button>
+                <button class="modal-close" data-action="close-modal" data-modal="game-modal">&times;</button>
             </div>
             <div class="modal-body" id="game-modal-body"></div>
         </div>
@@ -822,7 +822,7 @@
         <div class="modal">
             <div class="modal-header">
                 <span class="modal-title" id="team-modal-title"></span>
-                <button class="modal-close" onclick="closeModal('team-modal')">&times;</button>
+                <button class="modal-close" data-action="close-modal" data-modal="team-modal">&times;</button>
             </div>
             <div class="modal-body" id="team-modal-body"></div>
         </div>
@@ -832,18 +832,42 @@
         let season = '2024-25', teams = [];
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
 
+        const HTML_ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
+
+        // All API/database values must pass through this helper before insertion
+        // into an HTML template. Event arguments are stored in escaped data
+        // attributes and handled by the delegated click listener below.
+        function h(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
+        }
+
+        function present(value, fallback = '-') {
+            return value === null || value === undefined || value === '' ? fallback : value;
+        }
+
+        function pct(value) {
+            const number = Number(value);
+            return value === null || value === undefined || value === '' || !Number.isFinite(number)
+                ? '-'
+                : `${(number * 100).toFixed(1)}%`;
+        }
+
+        function showStatus(container, kind, message) {
+            const status = document.createElement('div');
+            status.className = kind;
+            status.textContent = message;
+            container.replaceChildren(status);
+        }
+
+        function showLoading(container, subject) {
+            showStatus(container, 'loading', `Loading ${subject}`);
+        }
+
+        function showError(container, subject, error) {
+            showStatus(container, 'error', `Error loading ${subject}: ${error.message}`);
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
-            const seasons = await api('/api/seasons');
-            if (seasons.length) season = seasons[0].id;
-            document.getElementById('season-select').innerHTML = seasons.map(s =>
-                `<option value="${s.id}"${s.id===season?' selected':''}>${s.id}</option>`
-            ).join('');
-            document.getElementById('season-select').onchange = e => { season = e.target.value; loadSection(); };
-
-            teams = await api('/api/teams');
-            document.getElementById('games-team').innerHTML = '<option value="">All Teams</option>' +
-                teams.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('');
-
             document.querySelectorAll('.nav-link').forEach(a =>
                 a.onclick = e => { e.preventDefault(); switchTo(a.dataset.section); }
             );
@@ -865,7 +889,48 @@
                 if(e.key === 'Escape') document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
             };
 
-            loadStandings();
+            document.addEventListener('click', e => {
+                const target = e.target.closest('[data-action]');
+                if (!target) return;
+                const actions = {
+                    player: () => openPlayer(target.dataset.id),
+                    game: () => openGame(target.dataset.id),
+                    team: () => openTeam(target.dataset.id),
+                    paginate: () => paginate(target.dataset.key, Number(target.dataset.direction)),
+                    'close-modal': () => closeModal(target.dataset.modal)
+                };
+                actions[target.dataset.action]?.();
+            });
+
+            try {
+                const seasons = await api('/api/seasons');
+                if (seasons.length) season = seasons[0].id;
+                const seasonSelect = document.getElementById('season-select');
+                seasonSelect.replaceChildren(...seasons.map(s => {
+                    const option = document.createElement('option');
+                    option.value = s.id;
+                    option.textContent = s.id;
+                    option.selected = s.id === season;
+                    return option;
+                }));
+                seasonSelect.onchange = e => { season = e.target.value; loadSection(); };
+
+                teams = await api('/api/teams');
+                const teamSelect = document.getElementById('games-team');
+                const allTeams = document.createElement('option');
+                allTeams.value = '';
+                allTeams.textContent = 'All Teams';
+                teamSelect.replaceChildren(allTeams, ...teams.map(t => {
+                    const option = document.createElement('option');
+                    option.value = t.id;
+                    option.textContent = t.full_name;
+                    return option;
+                }));
+
+                loadStandings();
+            } catch (error) {
+                showError(document.getElementById('standings-table'), 'application', error);
+            }
         });
 
         async function api(url) {
@@ -887,46 +952,46 @@
 
         async function loadStandings() {
             const c = document.getElementById('standings-table');
-            c.innerHTML = '<div class="loading">Loading standings</div>';
+            showLoading(c, 'standings');
             try {
-                const d = await api(`/api/standings?season=${season}`);
+                const d = await api(`/api/standings?${new URLSearchParams({season})}`);
                 c.innerHTML = `<table>
                     <thead><tr><th style="width:50px">#</th><th>Team</th><th>W</th><th>L</th><th>PCT</th><th style="width:120px"></th></tr></thead>
                     <tbody>${d.map((t, i) => `
                         <tr>
                             <td><span class="standings-rank ${i < 10 ? 'playoff' : ''}">${i + 1}</span></td>
-                            <td><span class="clickable" onclick="openTeam(${t.team_id})">${t.team_name}</span></td>
-                            <td class="num" style="color: var(--accent-green); font-weight: 600;">${t.wins}</td>
-                            <td class="num">${t.losses}</td>
-                            <td class="num" style="font-weight: 600;">${(t.win_pct * 100).toFixed(1)}%</td>
-                            <td><div class="win-pct-bar"><div class="win-pct-bar-fill" style="width:${t.win_pct * 100}%"></div></div></td>
+                            <td><span class="clickable" data-action="team" data-id="${h(t.team_id)}">${h(t.team_name)}</span></td>
+                            <td class="num" style="color: var(--accent-green); font-weight: 600;">${h(present(t.wins))}</td>
+                            <td class="num">${h(present(t.losses))}</td>
+                            <td class="num" style="font-weight: 600;">${h(pct(t.win_pct))}</td>
+                            <td><div class="win-pct-bar"><div class="win-pct-bar-fill" style="width:${Math.min(100, Math.max(0, Number(t.win_pct) * 100 || 0))}%"></div></div></td>
                         </tr>
                     `).join('')}</tbody>
                 </table>`;
-            } catch(e) { c.innerHTML = `<div class="error">Error loading standings: ${e.message}</div>`; }
+            } catch(e) { showError(c, 'standings', e); }
         }
 
         async function loadLeaders() {
             const stat = document.getElementById('leaders-stat').value;
             const statLabels = {points:'PPG', rebounds:'RPG', assists:'APG', steals:'SPG', blocks:'BPG'};
             const c = document.getElementById('leaders-grid');
-            c.innerHTML = '<div class="loading">Loading leaders</div>';
+            showLoading(c, 'leaders');
             try {
-                const d = await api(`/api/leaders/${stat}?season=${season}&limit=12`);
+                const d = await api(`/api/leaders/${encodeURIComponent(stat)}?${new URLSearchParams({season, limit: 12})}`);
                 c.innerHTML = d.data.map(p => `
                     <div class="stat-card">
                         <div class="stat-card-header">
                             <div>
-                                <div class="stat-card-name" onclick="openPlayer(${p.player_id})">${p.player_name}</div>
-                                <div class="stat-card-team">${p.team_abbr} &middot; ${p.games_played} GP</div>
+                                <div class="stat-card-name" data-action="player" data-id="${h(p.player_id)}">${h(p.player_name)}</div>
+                                <div class="stat-card-team">${h(p.team_abbr)} &middot; ${h(present(p.games_played))} GP</div>
                             </div>
-                            <div class="stat-card-rank ${p.rank <= 3 ? 'top3' : ''}">${p.rank}</div>
+                            <div class="stat-card-rank ${p.rank <= 3 ? 'top3' : ''}">${h(present(p.rank))}</div>
                         </div>
-                        <div class="stat-card-value">${p.value}</div>
-                        <div class="stat-card-label">${statLabels[stat]}</div>
+                        <div class="stat-card-value">${h(present(p.value))}</div>
+                        <div class="stat-card-label">${h(statLabels[stat])}</div>
                     </div>
                 `).join('');
-            } catch(e) { c.innerHTML = `<div class="error">Error loading leaders: ${e.message}</div>`; }
+            } catch(e) { showError(c, 'leaders', e); }
         }
 
         async function loadGames(reset = true) {
@@ -934,7 +999,7 @@
             const team = document.getElementById('games-team').value;
             const sort = document.getElementById('games-sort').value;
             const c = document.getElementById('games-grid');
-            c.innerHTML = '<div class="loading">Loading games</div>';
+            showLoading(c, 'games');
             try {
                 const p = new URLSearchParams({season, limit: page.games.l, offset: page.games.o, sort});
                 if (team) p.append('team_id', team);
@@ -944,23 +1009,23 @@
                 c.innerHTML = d.data.map(g => {
                     const homeWin = g.home_score > g.away_score;
                     return `
-                        <div class="game-card" onclick="openGame('${g.id}')">
-                            <div class="game-card-date">${g.game_date || 'TBD'}</div>
+                        <div class="game-card" data-action="game" data-id="${h(g.id)}">
+                            <div class="game-card-date">${h(present(g.game_date, 'TBD'))}</div>
                             <div class="game-card-teams">
                                 <div class="game-team-row ${!homeWin ? 'winner' : ''}">
-                                    <span class="game-team-name">${g.away_team}</span>
-                                    <span class="game-team-score">${g.away_score}</span>
+                                    <span class="game-team-name">${h(g.away_team)}</span>
+                                    <span class="game-team-score">${h(present(g.away_score))}</span>
                                 </div>
                                 <div class="game-team-row ${homeWin ? 'winner' : ''}">
-                                    <span class="game-team-name">@ ${g.home_team}</span>
-                                    <span class="game-team-score">${g.home_score}</span>
+                                    <span class="game-team-name">@ ${h(g.home_team)}</span>
+                                    <span class="game-team-score">${h(present(g.home_score))}</span>
                                 </div>
                             </div>
                         </div>
                     `;
                 }).join('');
                 renderPagination('games');
-            } catch(e) { c.innerHTML = `<div class="error">Error loading games: ${e.message}</div>`; }
+            } catch(e) { showError(c, 'games', e); }
         }
 
         async function loadPlayers(reset = true) {
@@ -968,7 +1033,7 @@
             const search = document.getElementById('player-search').value;
             const active = document.getElementById('player-active').value;
             const c = document.getElementById('players-table');
-            c.innerHTML = '<div class="loading">Loading players</div>';
+            showLoading(c, 'players');
             try {
                 const p = new URLSearchParams({limit: page.players.l, offset: page.players.o});
                 if (search) p.append('search', search);
@@ -980,13 +1045,13 @@
                     <thead><tr><th>Player</th><th>Status</th></tr></thead>
                     <tbody>${d.data.map(p => `
                         <tr>
-                            <td><span class="clickable" onclick="openPlayer(${p.id})">${p.full_name}</span></td>
+                            <td><span class="clickable" data-action="player" data-id="${h(p.id)}">${h(p.full_name)}</span></td>
                             <td><span class="badge badge-${p.is_active ? 'active' : 'inactive'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
                         </tr>
                     `).join('')}</tbody>
                 </table>`;
                 renderPagination('players');
-            } catch(e) { c.innerHTML = `<div class="error">Error loading players: ${e.message}</div>`; }
+            } catch(e) { showError(c, 'players', e); }
         }
 
         function renderPagination(key) {
@@ -994,9 +1059,9 @@
             const pg = Math.floor(s.o / s.l) + 1;
             const tot = Math.ceil(s.t / s.l);
             document.getElementById(`${key}-pagination`).innerHTML = `
-                <button ${s.o === 0 ? 'disabled' : ''} onclick="paginate('${key}', -1)">Previous</button>
+                <button ${s.o === 0 ? 'disabled' : ''} data-action="paginate" data-key="${h(key)}" data-direction="-1">Previous</button>
                 <span class="pagination-info">Page ${pg} of ${tot}</span>
-                <button ${s.o + s.l >= s.t ? 'disabled' : ''} onclick="paginate('${key}', 1)">Next</button>
+                <button ${s.o + s.l >= s.t ? 'disabled' : ''} data-action="paginate" data-key="${h(key)}" data-direction="1">Next</button>
             `;
         }
 
@@ -1014,22 +1079,22 @@
             const m = document.getElementById('player-modal');
             const b = document.getElementById('player-modal-body');
             m.classList.add('active');
-            b.innerHTML = '<div class="loading">Loading player</div>';
+            showLoading(b, 'player');
             try {
                 const [p, stats] = await Promise.all([
-                    api(`/api/players/${id}`),
-                    api(`/api/players/${id}/stats`).catch(() => [])
+                    api(`/api/players/${encodeURIComponent(id)}`),
+                    api(`/api/players/${encodeURIComponent(id)}/stats`).catch(() => [])
                 ]);
                 document.getElementById('player-modal-title').textContent = p.full_name;
                 const cur = stats.find(s => s.season === season);
                 b.innerHTML = `
                     <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-box-value">${cur?.ppg || '-'}</div><div class="stat-box-label">PPG</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${cur?.rpg || '-'}</div><div class="stat-box-label">RPG</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${cur?.apg || '-'}</div><div class="stat-box-label">APG</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${cur?.spg || '-'}</div><div class="stat-box-label">SPG</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${cur?.bpg || '-'}</div><div class="stat-box-label">BPG</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${cur?.games_played || '-'}</div><div class="stat-box-label">GP</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.ppg))}</div><div class="stat-box-label">PPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.rpg))}</div><div class="stat-box-label">RPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.apg))}</div><div class="stat-box-label">APG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.spg))}</div><div class="stat-box-label">SPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.bpg))}</div><div class="stat-box-label">BPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(cur?.games_played))}</div><div class="stat-box-label">GP</div></div>
                     </div>
                     ${stats.length ? `
                         <h3 class="section-subtitle">Career Statistics</h3>
@@ -1038,54 +1103,54 @@
                                 <thead><tr><th>Season</th><th>GP</th><th>PPG</th><th>RPG</th><th>APG</th><th>FG%</th><th>3P%</th><th>FT%</th></tr></thead>
                                 <tbody>${stats.map(s => `
                                     <tr>
-                                        <td style="font-weight:600;">${s.season}</td>
-                                        <td class="num">${s.games_played}</td>
-                                        <td class="num" style="color:var(--accent);font-weight:600;">${s.ppg}</td>
-                                        <td class="num">${s.rpg}</td>
-                                        <td class="num">${s.apg}</td>
-                                        <td class="num">${s.fg_pct ? (s.fg_pct * 100).toFixed(1) + '%' : '-'}</td>
-                                        <td class="num">${s.fg3_pct ? (s.fg3_pct * 100).toFixed(1) + '%' : '-'}</td>
-                                        <td class="num">${s.ft_pct ? (s.ft_pct * 100).toFixed(1) + '%' : '-'}</td>
+                                        <td style="font-weight:600;">${h(present(s.season))}</td>
+                                        <td class="num">${h(present(s.games_played))}</td>
+                                        <td class="num" style="color:var(--accent);font-weight:600;">${h(present(s.ppg))}</td>
+                                        <td class="num">${h(present(s.rpg))}</td>
+                                        <td class="num">${h(present(s.apg))}</td>
+                                        <td class="num">${h(pct(s.fg_pct))}</td>
+                                        <td class="num">${h(pct(s.fg3_pct))}</td>
+                                        <td class="num">${h(pct(s.ft_pct))}</td>
                                     </tr>
                                 `).join('')}</tbody>
                             </table>
                         </div></div>
                     ` : '<p style="color:var(--text-muted);text-align:center;padding:2rem;">No statistics available</p>'}
                 `;
-            } catch(e) { b.innerHTML = `<div class="error">Error loading player: ${e.message}</div>`; }
+            } catch(e) { showError(b, 'player', e); }
         }
 
         async function openGame(id) {
             const m = document.getElementById('game-modal');
             const b = document.getElementById('game-modal-body');
             m.classList.add('active');
-            b.innerHTML = '<div class="loading">Loading game</div>';
+            showLoading(b, 'game');
             try {
-                const d = await api(`/api/games/${id}/boxscore`);
+                const d = await api(`/api/games/${encodeURIComponent(id)}/boxscore`);
                 const g = d.game;
                 const homeWin = g.home_score > g.away_score;
                 document.getElementById('game-modal-title').textContent = `${g.away_team} @ ${g.home_team}`;
                 b.innerHTML = `
                     <div class="game-score-display">
-                        <div class="game-score-date">${g.game_date || ''}</div>
+                        <div class="game-score-date">${h(present(g.game_date, ''))}</div>
                         <div class="game-score-teams">
                             <div class="game-score-team">
-                                <div class="game-score-team-name">${g.away_team}</div>
-                                <div class="game-score-team-score ${!homeWin ? 'winner' : ''}">${g.away_score}</div>
+                                <div class="game-score-team-name">${h(g.away_team)}</div>
+                                <div class="game-score-team-score ${!homeWin ? 'winner' : ''}">${h(present(g.away_score))}</div>
                             </div>
                             <div class="game-score-vs">-</div>
                             <div class="game-score-team">
-                                <div class="game-score-team-name">${g.home_team}</div>
-                                <div class="game-score-team-score ${homeWin ? 'winner' : ''}">${g.home_score}</div>
+                                <div class="game-score-team-name">${h(g.home_team)}</div>
+                                <div class="game-score-team-score ${homeWin ? 'winner' : ''}">${h(present(g.home_score))}</div>
                             </div>
                         </div>
                     </div>
-                    <h3 class="section-subtitle">${g.away_team}</h3>
+                    <h3 class="section-subtitle">${h(g.away_team)}</h3>
                     ${boxscoreTable(d.away_players)}
-                    <h3 class="section-subtitle" style="margin-top:1.5rem;">${g.home_team}</h3>
+                    <h3 class="section-subtitle" style="margin-top:1.5rem;">${h(g.home_team)}</h3>
                     ${boxscoreTable(d.home_players)}
                 `;
-            } catch(e) { b.innerHTML = `<div class="error">Error loading game: ${e.message}</div>`; }
+            } catch(e) { showError(b, 'game', e); }
         }
 
         function boxscoreTable(players) {
@@ -1093,17 +1158,17 @@
                 <thead><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FG</th><th>3PT</th><th>FT</th><th>+/-</th></tr></thead>
                 <tbody>${players.map(p => `
                     <tr>
-                        <td><span class="clickable" onclick="openPlayer(${p.player_id})">${p.player_name}</span></td>
-                        <td class="num">${p.minutes ? Math.round(p.minutes) : '-'}</td>
-                        <td class="num" style="${p.points >= 20 ? 'color:var(--accent);font-weight:600;' : ''}">${p.points}</td>
-                        <td class="num" style="${p.rebounds >= 10 ? 'color:var(--accent-blue);font-weight:600;' : ''}">${p.rebounds}</td>
-                        <td class="num" style="${p.assists >= 10 ? 'color:var(--accent-green);font-weight:600;' : ''}">${p.assists}</td>
-                        <td class="num">${p.steals}</td>
-                        <td class="num">${p.blocks}</td>
-                        <td class="num">${p.fgm}-${p.fga}</td>
-                        <td class="num">${p.fg3m}-${p.fg3a}</td>
-                        <td class="num">${p.ftm}-${p.fta}</td>
-                        <td class="num" style="${p.plus_minus > 0 ? 'color:var(--accent-green);' : p.plus_minus < 0 ? 'color:#ef4444;' : ''}">${p.plus_minus > 0 ? '+' : ''}${p.plus_minus || 0}</td>
+                        <td><span class="clickable" data-action="player" data-id="${h(p.player_id)}">${h(p.player_name)}</span></td>
+                        <td class="num">${h(p.minutes === null || p.minutes === undefined ? '-' : Math.round(Number(p.minutes)))}</td>
+                        <td class="num" style="${p.points >= 20 ? 'color:var(--accent);font-weight:600;' : ''}">${h(present(p.points))}</td>
+                        <td class="num" style="${p.rebounds >= 10 ? 'color:var(--accent-blue);font-weight:600;' : ''}">${h(present(p.rebounds))}</td>
+                        <td class="num" style="${p.assists >= 10 ? 'color:var(--accent-green);font-weight:600;' : ''}">${h(present(p.assists))}</td>
+                        <td class="num">${h(present(p.steals))}</td>
+                        <td class="num">${h(present(p.blocks))}</td>
+                        <td class="num">${h(present(p.fgm))}-${h(present(p.fga))}</td>
+                        <td class="num">${h(present(p.fg3m))}-${h(present(p.fg3a))}</td>
+                        <td class="num">${h(present(p.ftm))}-${h(present(p.fta))}</td>
+                        <td class="num" style="${p.plus_minus > 0 ? 'color:var(--accent-green);' : p.plus_minus < 0 ? 'color:#ef4444;' : ''}">${p.plus_minus > 0 ? '+' : ''}${h(present(p.plus_minus, 0))}</td>
                     </tr>
                 `).join('')}</tbody>
             </table></div></div>`;
@@ -1113,45 +1178,45 @@
             const m = document.getElementById('team-modal');
             const b = document.getElementById('team-modal-body');
             m.classList.add('active');
-            b.innerHTML = '<div class="loading">Loading team</div>';
+            showLoading(b, 'team');
             try {
                 const [t, games, standings] = await Promise.all([
-                    api(`/api/teams/${id}`),
-                    api(`/api/games?season=${season}&team_id=${id}&limit=10`),
-                    api(`/api/standings?season=${season}`)
+                    api(`/api/teams/${encodeURIComponent(id)}`),
+                    api(`/api/games?${new URLSearchParams({season, team_id: id, limit: 10})}`),
+                    api(`/api/standings?${new URLSearchParams({season})}`)
                 ]);
-                const s = standings.find(x => x.team_id === id);
-                const rank = standings.findIndex(x => x.team_id === id) + 1;
+                const s = standings.find(x => String(x.team_id) === String(id));
+                const rank = standings.findIndex(x => String(x.team_id) === String(id)) + 1;
                 document.getElementById('team-modal-title').textContent = t.full_name;
                 b.innerHTML = `
                     <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-box-value">${s?.wins || '-'}</div><div class="stat-box-label">Wins</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${s?.losses || '-'}</div><div class="stat-box-label">Losses</div></div>
-                        <div class="stat-box"><div class="stat-box-value">${s ? (s.win_pct * 100).toFixed(1) + '%' : '-'}</div><div class="stat-box-label">Win%</div></div>
-                        <div class="stat-box"><div class="stat-box-value">#${rank || '-'}</div><div class="stat-box-label">Rank</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(s?.wins))}</div><div class="stat-box-label">Wins</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(present(s?.losses))}</div><div class="stat-box-label">Losses</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${h(s ? pct(s.win_pct) : '-')}</div><div class="stat-box-label">Win%</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${rank > 0 ? `#${rank}` : '-'}</div><div class="stat-box-label">Rank</div></div>
                     </div>
-                    <p style="color:var(--text-muted);margin-bottom:1.5rem;">${t.city}, ${t.state} &middot; Founded ${t.year_founded}</p>
+                    <p style="color:var(--text-muted);margin-bottom:1.5rem;">${h(t.city)}, ${h(t.state)} &middot; Founded ${h(present(t.year_founded))}</p>
                     <h3 class="section-subtitle">Recent Games</h3>
                     <div class="table-container"><div class="table-scroll"><table>
                         <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th></tr></thead>
                         <tbody>${games.data.map(g => {
-                            const home = g.home_team_id === id;
+                            const home = String(g.home_team_id) === String(id);
                             const opp = home ? g.away_team : g.home_team;
                             const ts = home ? g.home_score : g.away_score;
                             const os = home ? g.away_score : g.home_score;
                             const win = ts > os;
                             return `
-                                <tr style="cursor:pointer;" onclick="openGame('${g.id}')">
-                                    <td>${g.game_date || '-'}</td>
-                                    <td>${home ? 'vs' : '@'} ${opp}</td>
+                                <tr style="cursor:pointer;" data-action="game" data-id="${h(g.id)}">
+                                    <td>${h(present(g.game_date))}</td>
+                                    <td>${home ? 'vs' : '@'} ${h(opp)}</td>
                                     <td><span class="badge badge-${win ? 'win' : 'loss'}">${win ? 'W' : 'L'}</span></td>
-                                    <td class="num" style="font-weight:600;">${ts}-${os}</td>
+                                    <td class="num" style="font-weight:600;">${h(present(ts))}-${h(present(os))}</td>
                                 </tr>
                             `;
                         }).join('')}</tbody>
                     </table></div></div>
                 `;
-            } catch(e) { b.innerHTML = `<div class="error">Error loading team: ${e.message}</div>`; }
+            } catch(e) { showError(b, 'team', e); }
         }
 
     </script>
