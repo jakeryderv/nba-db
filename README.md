@@ -44,7 +44,7 @@ All endpoints are read-only. Interactive docs at `/docs`.
 
 ```bash
 curl "https://nba-api-production-0cd7.up.railway.app/api/players?search=lebron"
-curl "https://nba-api-production-0cd7.up.railway.app/api/leaders/points?season=2024-25"
+curl "https://nba-api-production-0cd7.up.railway.app/api/leaders/points?season=2025-26"
 ```
 
 ## Local development
@@ -55,25 +55,69 @@ Prerequisites: Docker, Python 3.11+, [uv](https://github.com/astral-sh/uv).
 make install       # uv sync
 cp .env.example .env
 make db-start      # PostgreSQL in Docker
-make etl           # extract + transform + load (default SEASON=2024-25)
+make season-build SEASON=2025-26
+make season-load-local SEASON=2025-26
 make api           # http://localhost:8000
 ```
 
-Other useful targets (`make help` for all): `make etl SEASON=2023-24`, `make etl-multi`, `make db-shell`, `make status`, `make seasons`.
+Every data command requires an explicit season. There is no default season or default multi-season backfill. Run `make help` for the complete target list.
 
-## Loading data into production
+## Safe season lifecycle
 
-The **Refresh Data** GitHub Actions workflow can be run on demand via `workflow_dispatch` with an optional `season` input. It re-downloads the selected season from the NBA API and loads it into the production database.
+The guarded lifecycle handles exactly one NBA **Regular Season** dataset at a time. Preseason, All-Star, Play-In, and playoff datasets are outside this workflow's scope. Run extraction from a trusted machine that can reach `stats.nba.com`; GitHub Actions performs validation only against its ephemeral PostgreSQL service and never loads production.
 
-**Current status: the cron trigger is not present in the workflow.** stats.nba.com blocks requests from GitHub's datacenter IPs (requests hang until timeout), so scheduled runs cannot reach the API. Until the 2026-27 season starts, refreshes are run manually from a trusted machine (see below). Options for re-enabling automation at season start: a local cron job, a self-hosted GitHub runner, or a residential proxy for the hosted runner.
+### 1. Build and validate one season
 
-Manual loading from a trusted machine still works:
+Choose the season deliberately. This force-downloads fresh source data, transforms it, validates file relationships and official Regular Season game IDs in the `002.......` format, and writes `data/clean/<season>/manifest.json` with source scope, row counts, and SHA-256 checksums.
 
 ```bash
-DATABASE_URL="postgresql://user:pass@host:port/dbname" make refresh SEASON=2025-26
+make season-build SEASON=2025-26
+uv run python -m json.tool data/clean/2025-26/manifest.json
 ```
 
-(`extract`/`transform` only touch local files; only the `load` step needs the production `DATABASE_URL` — Railway's public TCP-proxy address, not the internal one.)
+Do not edit transformed files after the manifest is created. Local load and production promotion recompute the checksums and fail closed if the dataset changed.
+
+### 2. Replace the local database
+
+Start PostgreSQL, ensure no production URL is present, then load the manifested season locally:
+
+```bash
+make db-start
+unset DATABASE_URL PRODUCTION_DATABASE_URL
+make season-load-local SEASON=2025-26
+```
+
+This is an exact one-season replacement: all other local season rows are removed inside the replacement transaction. Verify the local API and data before considering production promotion. There is no raw load or multi-season Make target. `refresh` exists only as a compatibility alias for the same guarded build and localhost replacement; it is not a production promotion path.
+
+### 3. Promote with backup and typed confirmations
+
+Promotion requires the dedicated `PRODUCTION_DATABASE_URL` environment variable. It is never accepted as a CLI argument and is intentionally distinct from the app's ordinary `DATABASE_URL`. Read the secret without echoing it or storing it in shell history:
+
+```bash
+read -rsp "Production database URL: " PRODUCTION_DATABASE_URL
+printf '\n'
+export PRODUCTION_DATABASE_URL
+```
+
+Create a protected backup directory outside the repository, then run promotion. The backup file must be a new path; the command refuses to overwrite an existing file.
+
+```bash
+install -d -m 700 "$HOME/.local/share/nba-db/backups"
+make season-promote \
+  SEASON=2025-26 \
+  TARGET=production \
+  CONFIRM_SEASON=2025-26 \
+  CONFIRM_SINGLE_SEASON='DELETE OTHER SEASONS' \
+  BACKUP_FILE="$HOME/.local/share/nba-db/backups/nba-db-before-2025-26-20260721T180000Z.dump" \
+  API_URL=https://nba-api-production-0cd7.up.railway.app
+unset PRODUCTION_DATABASE_URL
+```
+
+Promotion verifies the manifest again, rejects local database targets, and takes a database advisory lock held from the protected custom-format `pg_dump` through the final live smoke check. It atomically replaces production so it contains exactly the confirmed season, then checks live health, season metadata, game identity/count, a sampled box score, standings, and points leaders against the manifest and promoted season. The API smoke check retries briefly; if it ultimately fails, the database replacement has already committed, so investigate immediately and restore the backup if the promoted data is not acceptable.
+
+### Backup restore guidance
+
+Keep the reported backup path and restrict access to it. First inspect the archive with `pg_restore --list` and restore it into an isolated recovery database using PostgreSQL's `pg_restore --clean --if-exists --no-owner` options. Verify season counts and API behavior there. Only then schedule a controlled production restore using the same archive. Supply connection fields and passwords through PostgreSQL environment variables or a protected service file—not command-line connection strings—and confirm the target database before running any restore. A restore replaces the full pre-promotion database state, including seasons that promotion removed.
 
 ## Testing
 
@@ -87,7 +131,8 @@ make check       # ruff + mypy
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | Full connection string (takes precedence; used on Railway) |
+| `DATABASE_URL` | Application/development connection string (takes precedence; used on Railway) |
+| `PRODUCTION_DATABASE_URL` | Promotion-only connection string; export interactively and never store in CLI arguments or GitHub Actions |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` | Individual settings for local development |
 | `READONLY_DB_PASSWORD` | Optional. When set, `init_db.py` provisions a SELECT-only `nba_readonly` role and the web app connects as it |
 
@@ -99,7 +144,7 @@ Schema migration files are immutable after they have been applied. To change the
 
 ## Roadmap
 
-- [x] Scheduled data refresh (built; schedule disabled until 2026-27 — see Loading data into production)
+- [ ] Automated data refresh (production loading is currently a guarded operator task)
 - [ ] Shot chart data and visualizations
 - [ ] Historical season backfill
 

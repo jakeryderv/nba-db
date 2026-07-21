@@ -1,8 +1,12 @@
-.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform load etl etl-multi refresh test test-data clean clean-season seasons status lint format typecheck check api
+.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform refresh season-build season-load-local season-promote require-season require-promotion test test-data clean seasons status lint format typecheck check api
 
 # Configuration
-SEASON ?= 2024-25
-SEASONS ?= 2024-25 2023-24 2022-23 2021-22 2020-21
+SEASON ?=
+TARGET ?=
+CONFIRM_SEASON ?=
+CONFIRM_SINGLE_SEASON ?=
+BACKUP_FILE ?=
+API_URL ?=
 
 # Default target
 help:
@@ -18,16 +22,17 @@ help:
 	@echo "  make db-shell    - Open psql shell"
 	@echo "  make db-logs     - View database logs"
 	@echo ""
-	@echo "ETL Pipeline (default season: $(SEASON)):"
+	@echo "Season Lifecycle (explicit SEASON=YYYY-YY required):"
+	@echo "  make season-build       - Extract, transform, validate, and write manifest"
+	@echo "  make season-load-local  - Replace local DB with exactly the manifested season"
+	@echo "  make season-promote     - Back up and replace production with typed confirmations"
+	@echo ""
+	@echo "Data preparation:"
 	@echo "  make extract     - Download data from NBA API"
 	@echo "  make transform   - Transform raw data to CSVs"
-	@echo "  make load        - Load CSVs into database"
-	@echo "  make etl         - Run full ETL pipeline"
-	@echo "  make etl-multi   - Run ETL for multiple seasons"
-	@echo "  make refresh     - Force re-download + reload one season (for data refresh)"
+	@echo "  make refresh     - Local-only alias for guarded season build + load"
 	@echo ""
-	@echo "  Override season:  make etl SEASON=2023-24"
-	@echo "  Override seasons: make etl-multi SEASONS='2023-24 2022-23'"
+	@echo "  Example local build: make season-build SEASON=2025-26"
 	@echo ""
 	@echo "Testing & Quality:"
 	@echo "  make test        - Run API test suite (requires make db-start)"
@@ -77,34 +82,46 @@ db-logs:
 	docker compose logs -f db
 
 # ETL Pipeline
-extract:
-	uv run python etl/extract.py --season $(SEASON)
+require-season:
+	@test -n "$(strip $(SEASON))" || (echo "ERROR: set an explicit SEASON=YYYY-YY" && exit 2)
+	@uv run python -m etl.season_lifecycle validate-season --season "$(SEASON)"
 
-transform:
-	uv run python etl/transform.py --season $(SEASON)
+require-promotion: require-season
+	@test "$(TARGET)" = "production" || (echo "ERROR: set TARGET=production" && exit 2)
+	@test "$(CONFIRM_SEASON)" = "$(SEASON)" || (echo "ERROR: type CONFIRM_SEASON=$(SEASON)" && exit 2)
+	@test "$(CONFIRM_SINGLE_SEASON)" = "DELETE OTHER SEASONS" || (echo "ERROR: type CONFIRM_SINGLE_SEASON='DELETE OTHER SEASONS'" && exit 2)
+	@test -n "$(strip $(BACKUP_FILE))" || (echo "ERROR: set BACKUP_FILE to a new protected backup path" && exit 2)
+	@test -n "$(strip $(API_URL))" || (echo "ERROR: set API_URL to the credential-free production HTTPS URL" && exit 2)
+	@test "$(origin PRODUCTION_DATABASE_URL)" != "command line" || (echo "ERROR: export PRODUCTION_DATABASE_URL; do not pass it as a make argument" && exit 2)
+	@test -n "$$PRODUCTION_DATABASE_URL" || (echo "ERROR: export PRODUCTION_DATABASE_URL in the environment" && exit 2)
 
-load:
-	PYTHONPATH=. uv run python etl/load.py --season $(SEASON)
+extract: require-season
+	uv run python etl/extract.py --season "$(SEASON)"
 
-etl: extract transform load
-	@echo "ETL pipeline complete for season $(SEASON)!"
+transform: require-season
+	uv run python etl/transform.py --season "$(SEASON)"
 
-etl-multi:
-	@for s in $(SEASONS); do \
-		echo ""; \
-		echo "========================================"; \
-		echo "Processing season $$s"; \
-		echo "========================================"; \
-		$(MAKE) etl SEASON=$$s || exit 1; \
-	done
-	@echo ""
-	@echo "All seasons complete!"
+season-build: require-season
+	uv run python etl/extract.py --season "$(SEASON)" --force
+	uv run python etl/transform.py --season "$(SEASON)"
+	uv run python -m etl.season_lifecycle manifest --season "$(SEASON)"
+	@echo "Season build and manifest complete for $(SEASON)."
 
-refresh:
-	uv run python etl/extract.py --season $(SEASON) --force
-	uv run python etl/transform.py --season $(SEASON)
-	PYTHONPATH=. uv run python etl/load.py --season $(SEASON)
-	@echo "Refresh complete for season $(SEASON)!"
+season-load-local: require-season
+	uv run python -m etl.season_lifecycle load-local --season "$(SEASON)"
+
+season-promote: require-promotion
+	uv run python -m etl.season_lifecycle promote \
+		--season "$(SEASON)" \
+		--target "$(TARGET)" \
+		--confirm-season "$(CONFIRM_SEASON)" \
+		--confirm-single-season "$(CONFIRM_SINGLE_SEASON)" \
+		--backup-file "$(BACKUP_FILE)" \
+		--api-url "$(API_URL)"
+
+refresh: season-build
+	$(MAKE) season-load-local SEASON="$(SEASON)"
+	@echo "Local-only refresh completed; production requires season-promote."
 
 # Info commands
 seasons:
@@ -140,11 +157,6 @@ clean:
 	rm -rf __pycache__ **/__pycache__
 	rm -rf .pytest_cache
 	@echo "Cleaned generated files"
-
-clean-season:
-	rm -rf data/raw/$(SEASON)/
-	rm -rf data/clean/$(SEASON)/
-	@echo "Cleaned data for season $(SEASON)"
 
 # Quick status check
 status:

@@ -17,6 +17,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import time
 
 from nba_api.stats.endpoints import CommonAllPlayers, LeagueGameLog
@@ -29,6 +30,13 @@ BASE_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
 DEFAULT_SEASON = "2024-25"
 SEASON_TYPE = "Regular Season"
 REQUEST_DELAY = 0.6
+SEASON_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
+
+
+def validate_season_argument(season: str) -> None:
+    match = SEASON_PATTERN.fullmatch(season)
+    if not match or int(match.group(2)) != (int(match.group(1)) + 1) % 100:
+        raise ValueError("season must use the safe consecutive-year format YYYY-YY")
 
 
 def get_season_dir(season):
@@ -131,6 +139,10 @@ def main():
     args = parser.parse_args()
 
     season = args.season
+    try:
+        validate_season_argument(season)
+    except ValueError as exc:
+        parser.error(str(exc))
     print("=" * 50)
     print(f"NBA Data Extract - Season {season}")
     print("=" * 50)
