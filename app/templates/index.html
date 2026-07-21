@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NBA Stats</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -25,7 +22,7 @@
             --gradient: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
         }
         body {
-            font-family: 'Inter', system-ui, sans-serif;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             background: var(--bg);
             color: var(--text);
             line-height: 1.5;
@@ -420,6 +417,7 @@
             border-color: var(--accent);
             transform: translateY(-2px);
             outline: none;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
         }
         .game-card-date {
             font-size: 0.8rem;
@@ -707,6 +705,14 @@
                 border-radius: 0;
             }
         }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -723,7 +729,7 @@
         </div>
     </header>
 
-    <nav>
+    <nav aria-label="Primary">
         <ul>
             <li>
                 <a href="#standings" class="nav-link active" data-section="standings">
@@ -768,7 +774,7 @@
             <div class="section-header">
                 <h2 class="section-title">League Leaders</h2>
                 <div class="controls">
-                    <select id="leaders-stat" class="filter-select">
+                    <select id="leaders-stat" class="filter-select" aria-label="Leader statistic">
                         <option value="points">Points</option>
                         <option value="rebounds">Rebounds</option>
                         <option value="assists">Assists</option>
@@ -785,10 +791,10 @@
             <div class="section-header">
                 <h2 class="section-title">Games <span id="games-info"></span></h2>
                 <div class="controls">
-                    <select id="games-team" class="filter-select">
+                    <select id="games-team" class="filter-select" aria-label="Filter games by team">
                         <option value="">All Teams</option>
                     </select>
-                    <select id="games-sort" class="filter-select">
+                    <select id="games-sort" class="filter-select" aria-label="Sort games">
                         <option value="desc">Newest First</option>
                         <option value="asc">Oldest First</option>
                     </select>
@@ -805,9 +811,9 @@
                 <div class="controls">
                     <div class="search-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-                        <input type="text" id="player-search" placeholder="Search players...">
+                        <input type="search" id="player-search" placeholder="Search players..." aria-label="Search players">
                     </div>
-                    <select id="player-active" class="filter-select">
+                    <select id="player-active" class="filter-select" aria-label="Filter players by status">
                         <option value="">All Players</option>
                         <option value="true">Active</option>
                         <option value="false">Inactive</option>
@@ -911,7 +917,13 @@
                 m.onclick = e => { if(e.target === m) closeDetail(); };
             });
             document.onkeydown = e => {
-                if(e.key === 'Escape' && document.querySelector('.modal-overlay.active')) closeDetail();
+                const modal = document.querySelector('.modal-overlay.active');
+                if (!modal) return;
+                if (e.key === 'Escape') {
+                    closeDetail();
+                    return;
+                }
+                if (e.key === 'Tab') trapDialogFocus(e, modal);
             };
             window.addEventListener('hashchange', route);
 
@@ -1118,6 +1130,19 @@
                 modal.setAttribute('aria-hidden', 'true');
             });
             document.body.classList.remove('modal-open');
+        }
+
+        function trapDialogFocus(event, modal) {
+            const focusable = [...modal.querySelectorAll('a[href], button:not([disabled]), input, select, [tabindex]:not([tabindex="-1"])')];
+            if (!focusable.length) return;
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
         }
 
         function showModal(id) {

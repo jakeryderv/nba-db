@@ -130,6 +130,8 @@ make test-data   # data quality checks against loaded data
 make check       # ruff + mypy
 ```
 
+`make test` also runs the primary dashboard journeys in a headless Chromium browser. Install the browser once on a new workstation with `uv run playwright install chromium`; the test suite falls back to a locally installed Chrome when available.
+
 ## Configuration
 
 | Variable | Purpose |

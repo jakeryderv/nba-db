@@ -1,5 +1,6 @@
 """API tests against the seeded nba_db_test database."""
 
+import time
 from contextlib import contextmanager
 
 from tests.conftest import CELTICS, JORDAN, LAKERS, LEBRON, SEED_SEASON, TATUM
@@ -9,6 +10,7 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "healthy", "database": "connected"}
+    assert r.headers["cache-control"] == "no-store"
 
 
 def test_health_does_not_expose_database_error(client, monkeypatch):
@@ -61,12 +63,31 @@ def test_home_page_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "<html" in r.text.lower()
+    assert r.headers["cache-control"] == "public, max-age=300, stale-while-revalidate=3600"
 
 
 def test_list_seasons(client):
     r = client.get("/api/seasons")
     assert r.status_code == 200
     assert [s["id"] for s in r.json()] == [SEED_SEASON]
+    assert r.headers["cache-control"] == "public, max-age=300, stale-while-revalidate=3600"
+
+
+def test_representative_read_endpoints_respond_promptly(client):
+    paths = [
+        f"/api/standings?season={SEED_SEASON}",
+        f"/api/teams/{LAKERS}/stats?season={SEED_SEASON}",
+        f"/api/teams/{LAKERS}/players?season={SEED_SEASON}",
+        f"/api/players/{LEBRON}/games?season={SEED_SEASON}",
+        "/api/games/0022400001/boxscore",
+    ]
+
+    started = time.perf_counter()
+    responses = [client.get(path) for path in paths]
+    elapsed = time.perf_counter() - started
+
+    assert all(response.status_code == 200 for response in responses)
+    assert elapsed < 2.0, f"Representative API reads took {elapsed:.3f}s"
 
 
 def test_list_teams_sorted_by_name(client):
