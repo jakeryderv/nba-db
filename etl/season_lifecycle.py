@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 import numpy as np
 import pandas as pd
 import psycopg
-import requests  # type: ignore[import-untyped]
+import requests  # type: ignore[import-untyped, unused-ignore]
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from db.config import get_db_config
@@ -33,7 +33,7 @@ from scripts.init_db import apply_schema
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_ROOT = PROJECT_ROOT / "data" / "clean"
 MANIFEST_FILENAME = "manifest.json"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 SEASON_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 GAME_ID_PATTERN = re.compile(r"^002\d{7}$")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -529,8 +529,19 @@ def _sha256(path: Path) -> str:
 
 
 def generate_manifest(clean_root: Path, season: str) -> dict[str, Any]:
+    from etl.official_verification import (
+        OfficialVerificationError,
+        load_valid_report,
+        report_path,
+    )
+
     dataset = load_validated_dataset(clean_root, season)
     paths = dataset_paths(clean_root, season)
+    try:
+        verification_report = load_valid_report(clean_root, season, paths)
+    except OfficialVerificationError as exc:
+        raise ManifestVerificationError(str(exc)) from exc
+    verification_file = report_path(clean_root, season)
     manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "season": season,
@@ -551,6 +562,13 @@ def generate_manifest(clean_root: Path, season: str) -> dict[str, Any]:
             }
             for name, path in paths.items()
         },
+        "official_verification": {
+            "path": str(verification_file.relative_to(clean_root)),
+            "sha256": _sha256(verification_file),
+            "status": verification_report["status"],
+            "provider": verification_report["provider"],
+            "generated_at": verification_report["generated_at"],
+        },
     }
     output = manifest_path(clean_root, season)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -561,6 +579,12 @@ def generate_manifest(clean_root: Path, season: str) -> dict[str, Any]:
 
 
 def verify_manifest(clean_root: Path, season: str) -> SeasonDataset:
+    from etl.official_verification import (
+        OfficialVerificationError,
+        load_valid_report,
+        report_path,
+    )
+
     path = manifest_path(clean_root, season)
     if not path.is_file():
         raise ManifestVerificationError(f"Missing required manifest: {path}")
@@ -609,6 +633,30 @@ def verify_manifest(clean_root: Path, season: str) -> SeasonDataset:
         if entry.get("sha256") != _sha256(file_path):
             raise ManifestVerificationError(f"Checksum mismatch for {relative}")
 
+    verification = manifest.get("official_verification")
+    verification_file = report_path(clean_root, season)
+    expected_verification_path = str(verification_file.relative_to(clean_root))
+    if (
+        not isinstance(verification, dict)
+        or verification.get("path") != expected_verification_path
+        or verification.get("status") != "passed"
+        or verification.get("provider") != "stats.nba.com via nba_api"
+        or not isinstance(verification.get("generated_at"), str)
+    ):
+        raise ManifestVerificationError("Manifest official verification metadata is invalid")
+    if not verification_file.is_file():
+        raise ManifestVerificationError(
+            f"Missing manifested official verification report: {verification_file}"
+        )
+    if verification.get("sha256") != _sha256(verification_file):
+        raise ManifestVerificationError("Checksum mismatch for official verification report")
+    try:
+        report = load_valid_report(clean_root, season, paths)
+    except OfficialVerificationError as exc:
+        raise ManifestVerificationError(str(exc)) from exc
+    if report["generated_at"] != verification["generated_at"]:
+        raise ManifestVerificationError("Official verification timestamp does not match manifest")
+
     dataset = load_validated_dataset(clean_root, season)
     for name, file_path in paths.items():
         relative = str(file_path.relative_to(clean_root))
@@ -619,6 +667,8 @@ def verify_manifest(clean_root: Path, season: str) -> SeasonDataset:
             raise ManifestVerificationError(f"Row-count mismatch for {relative}")
     if manifest.get("counts") != dataset.counts:
         raise ManifestVerificationError("Manifest aggregate counts do not match transformed files")
+    if verification.get("sha256") != _sha256(verification_file):
+        raise ManifestVerificationError("Official verification changed while reading")
     return SeasonDataset(**{**dataset.__dict__, "manifest": manifest})
 
 

@@ -13,7 +13,7 @@ import psycopg
 import pytest
 
 from db.config import get_db_config
-from etl import extract, transform
+from etl import extract, official_verification, transform
 from etl import season_lifecycle as lifecycle
 from tests.conftest import CELTICS, LAKERS
 
@@ -148,9 +148,48 @@ def write_valid_dataset(root: Path) -> None:
     )
 
 
+def matching_official_frames(
+    dataset: lifecycle.SeasonDataset,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    team_columns = {local: official for official, local in official_verification.TEAM_STATS.items()}
+    player_columns = {
+        local: official for official, local in official_verification.PLAYER_STATS.items()
+    }
+    official_teams = (
+        official_verification._local_team_totals(dataset.games, dataset.team_stats)
+        .reset_index()
+        .rename(columns={"team_id": "TEAM_ID", **team_columns})
+    )
+    official_players = (
+        official_verification._local_player_totals(dataset.player_stats)
+        .reset_index()
+        .rename(columns={"player_id": "PLAYER_ID", **player_columns})
+    )
+    return official_teams, official_players
+
+
+def write_passing_verification(root: Path) -> None:
+    dataset = lifecycle.load_validated_dataset(root, SEASON)
+    official_teams, official_players = matching_official_frames(dataset)
+    paths = lifecycle.dataset_paths(root, SEASON)
+    report = official_verification.build_report(
+        season=SEASON,
+        teams=dataset.teams,
+        players=dataset.players,
+        games=dataset.games,
+        team_stats=dataset.team_stats,
+        player_stats=dataset.player_stats,
+        official_teams=official_teams,
+        official_players=official_players,
+        hashes=official_verification.dataset_hashes(root, paths),
+    )
+    official_verification.write_report(official_verification.report_path(root, SEASON), report)
+
+
 @pytest.fixture
 def valid_root(tmp_path: Path) -> Path:
     write_valid_dataset(tmp_path)
+    write_passing_verification(tmp_path)
     return tmp_path
 
 
@@ -169,7 +208,7 @@ def lifecycle_conn(client):
 def test_manifest_records_source_hashes_counts_and_verifies(valid_root: Path) -> None:
     manifest = lifecycle.generate_manifest(valid_root, SEASON)
 
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["season"] == SEASON
     assert manifest["season_type"] == "Regular Season"
     assert manifest["generated_at"]
@@ -182,7 +221,98 @@ def test_manifest_records_source_hashes_counts_and_verifies(valid_root: Path) ->
         "player_game_stats": 2,
     }
     assert len(manifest["files"]) == 5
+    assert manifest["official_verification"]["status"] == "passed"
     assert lifecycle.verify_manifest(valid_root, SEASON).counts == manifest["counts"]
+
+
+def test_official_verification_uses_injected_aggregates_without_network(
+    valid_root: Path,
+) -> None:
+    dataset = lifecycle.load_validated_dataset(valid_root, SEASON)
+    official_frames = matching_official_frames(dataset)
+
+    report = official_verification.run_verification(
+        valid_root,
+        SEASON,
+        fetcher=lambda _season: official_frames,
+    )
+
+    assert report["status"] == "passed"
+    assert report["mismatch_count"] == 0
+    assert report["checks"]["teams"]["checked"] == 2
+    assert report["checks"]["players"]["checked"] == 2
+
+
+def test_official_verification_writes_failed_report_on_mismatch(valid_root: Path) -> None:
+    dataset = lifecycle.load_validated_dataset(valid_root, SEASON)
+    official_teams, official_players = matching_official_frames(dataset)
+    official_players.loc[official_players["PLAYER_ID"] == PLAYER_ONE, "REB"] += 2
+
+    with pytest.raises(official_verification.OfficialVerificationError, match="1 mismatches"):
+        official_verification.run_verification(
+            valid_root,
+            SEASON,
+            fetcher=lambda _season: (official_teams, official_players),
+        )
+
+    report = json.loads(official_verification.report_path(valid_root, SEASON).read_text())
+    assert report["status"] == "failed"
+    assert report["checks"]["players"]["mismatches"] == [
+        {
+            "id": PLAYER_ONE,
+            "difference": -2,
+            "local": 40,
+            "name": "Player One",
+            "official": 42,
+            "stat": "rebounds",
+            "tolerance": 1,
+        }
+    ]
+
+
+def test_official_verification_reports_one_count_stat_corrections_as_warnings(
+    valid_root: Path,
+) -> None:
+    dataset = lifecycle.load_validated_dataset(valid_root, SEASON)
+    official_teams, official_players = matching_official_frames(dataset)
+    official_players.loc[official_players["PLAYER_ID"] == PLAYER_ONE, "REB"] += 1
+
+    report = official_verification.run_verification(
+        valid_root,
+        SEASON,
+        fetcher=lambda _season: (official_teams, official_players),
+    )
+
+    assert report["status"] == "passed"
+    assert report["difference_count"] == 1
+    assert report["mismatch_count"] == 0
+    assert report["checks"]["players"]["differences"][0]["tolerance"] == 1
+
+
+def test_manifest_requires_passing_official_verification(valid_root: Path) -> None:
+    official_verification.report_path(valid_root, SEASON).unlink()
+
+    with pytest.raises(lifecycle.ManifestVerificationError, match="Missing required official"):
+        lifecycle.generate_manifest(valid_root, SEASON)
+
+
+def test_manifest_rejects_stale_official_verification(valid_root: Path) -> None:
+    players_path = valid_root / "shared/players.csv"
+    players_path.write_text(players_path.read_text().replace("Player One", "Player 1"))
+
+    with pytest.raises(lifecycle.ManifestVerificationError, match="stale"):
+        lifecycle.generate_manifest(valid_root, SEASON)
+
+
+def test_manifest_rejects_verification_report_tampering(valid_root: Path) -> None:
+    lifecycle.generate_manifest(valid_root, SEASON)
+    path = official_verification.report_path(valid_root, SEASON)
+    report = json.loads(path.read_text())
+    report["generated_at"] = "2026-01-01T00:00:00+00:00"
+    path.write_text(json.dumps(report))
+
+    with pytest.raises(lifecycle.ManifestVerificationError, match="Checksum mismatch"):
+        lifecycle.verify_manifest(valid_root, SEASON)
 
 
 def test_manifest_rejects_checksum_tampering(valid_root: Path) -> None:
@@ -287,6 +417,23 @@ def test_make_guards_invalid_season_before_extract_and_has_no_clean_season_targe
     )
     assert removed.returncode != 0
     assert "No rule to make target" in removed.stderr
+
+
+def test_season_build_verifies_official_totals_before_manifest_and_ci_stays_offline() -> None:
+    dry_run = subprocess.run(
+        ["make", "-n", "season-build", f"SEASON={SEASON}"],
+        cwd=lifecycle.PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert dry_run.stdout.index("etl.official_verification") < dry_run.stdout.index(
+        "season_lifecycle manifest"
+    )
+
+    workflow = (lifecycle.PROJECT_ROOT / ".github/workflows/ci.yml").read_text()
+    assert "etl.official_verification" not in workflow
+    assert "stats.nba.com" not in workflow
 
 
 def test_missing_required_file_fails_closed_before_connect(

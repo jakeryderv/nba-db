@@ -1,4 +1,4 @@
-.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform refresh season-build season-load-local season-promote require-season require-promotion test test-data clean seasons status lint format typecheck check api
+.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-promote require-season require-promotion test test-data clean seasons status lint format typecheck check api
 
 # Configuration
 SEASON ?=
@@ -23,13 +23,14 @@ help:
 	@echo "  make db-logs     - View database logs"
 	@echo ""
 	@echo "Season Lifecycle (explicit SEASON=YYYY-YY required):"
-	@echo "  make season-build       - Extract, transform, validate, and write manifest"
+	@echo "  make season-build       - Extract, transform, cross-check, and write manifest"
 	@echo "  make season-load-local  - Replace local DB with exactly the manifested season"
 	@echo "  make season-promote     - Back up and replace production with typed confirmations"
 	@echo ""
 	@echo "Data preparation:"
 	@echo "  make extract     - Download data from NBA API"
 	@echo "  make transform   - Transform raw data to CSVs"
+	@echo "  make verify-official - Compare local totals with official NBA aggregates"
 	@echo "  make refresh     - Local-only alias for guarded season build + load"
 	@echo ""
 	@echo "  Example local build: make season-build SEASON=2025-26"
@@ -101,11 +102,15 @@ extract: require-season
 transform: require-season
 	uv run python etl/transform.py --season "$(SEASON)"
 
+verify-official: require-season
+	uv run python -m etl.official_verification --season "$(SEASON)"
+
 season-build: require-season
 	uv run python etl/extract.py --season "$(SEASON)" --force
 	uv run python etl/transform.py --season "$(SEASON)"
+	uv run python -m etl.official_verification --season "$(SEASON)"
 	uv run python -m etl.season_lifecycle manifest --season "$(SEASON)"
-	@echo "Season build and manifest complete for $(SEASON)."
+	@echo "Season build, official verification, and manifest complete for $(SEASON)."
 
 season-load-local: require-season
 	uv run python -m etl.season_lifecycle load-local --season "$(SEASON)"
