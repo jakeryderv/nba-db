@@ -37,10 +37,10 @@ jobs:
         run: uv sync
 
       - name: Lint
-        run: uv run ruff check etl/ app/ db/ tests/
+        run: uv run ruff check etl/ app/ db/ scripts/ tests/
 
       - name: Typecheck
-        run: uv run mypy etl/ app/ db/
+        run: uv run mypy etl/ app/ db/ scripts/
 
       - name: Test
         env:
