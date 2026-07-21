@@ -10,10 +10,12 @@ from fastapi.responses import HTMLResponse
 
 from app.db import close_pool, get_cursor
 from app.models import (
+    GameBoxScore,
     GameDetail,
     GameList,
     LeaderList,
     Player,
+    PlayerGameLog,
     PlayerGameStats,
     PlayerGameStatsList,
     PlayerList,
@@ -23,6 +25,9 @@ from app.models import (
     Team,
     TeamGameStats,
     TeamGameStatsList,
+    TeamPlayerSummary,
+    TeamPlayerSummaryList,
+    TeamSeasonSummary,
     TeamStanding,
 )
 
@@ -100,6 +105,119 @@ def get_team(team_id: int) -> Team:
         return Team(**row)
 
 
+@app.get("/api/teams/{team_id}/stats", response_model=TeamSeasonSummary, tags=["Teams"])
+def get_team_season_stats(
+    team_id: int, season: str = Query(..., description="Season (required)")
+) -> TeamSeasonSummary:
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            WITH team_games AS (
+                SELECT
+                    g.id,
+                    g.home_team_id = %s AS is_home,
+                    CASE WHEN g.home_team_id = %s THEN g.home_score ELSE g.away_score END
+                        AS team_score,
+                    CASE WHEN g.home_team_id = %s THEN g.away_score ELSE g.home_score END
+                        AS opponent_score
+                FROM games g
+                WHERE g.season = %s
+                  AND (g.home_team_id = %s OR g.away_team_id = %s)
+            )
+            SELECT
+                %s AS team_id,
+                %s AS season,
+                COUNT(*) AS games_played,
+                COUNT(*) FILTER (WHERE tg.team_score > tg.opponent_score) AS wins,
+                COUNT(*) FILTER (WHERE tg.team_score < tg.opponent_score) AS losses,
+                ROUND(
+                    COUNT(*) FILTER (WHERE tg.team_score > tg.opponent_score)::NUMERIC
+                    / NULLIF(COUNT(*), 0), 3
+                ) AS win_pct,
+                COUNT(*) FILTER (
+                    WHERE tg.is_home AND tg.team_score > tg.opponent_score
+                ) AS home_wins,
+                COUNT(*) FILTER (
+                    WHERE tg.is_home AND tg.team_score < tg.opponent_score
+                ) AS home_losses,
+                COUNT(*) FILTER (
+                    WHERE NOT tg.is_home AND tg.team_score > tg.opponent_score
+                ) AS away_wins,
+                COUNT(*) FILTER (
+                    WHERE NOT tg.is_home AND tg.team_score < tg.opponent_score
+                ) AS away_losses,
+                ROUND(AVG(tgs.points), 1) AS ppg,
+                ROUND(AVG(otgs.points), 1) AS opponent_ppg,
+                ROUND(AVG(tgs.rebounds), 1) AS rpg,
+                ROUND(AVG(tgs.assists), 1) AS apg,
+                ROUND(AVG(tgs.steals), 1) AS spg,
+                ROUND(AVG(tgs.blocks), 1) AS bpg,
+                ROUND(SUM(tgs.fgm)::NUMERIC / NULLIF(SUM(tgs.fga), 0), 3) AS fg_pct,
+                ROUND(SUM(tgs.fg3m)::NUMERIC / NULLIF(SUM(tgs.fg3a), 0), 3) AS fg3_pct,
+                ROUND(SUM(tgs.ftm)::NUMERIC / NULLIF(SUM(tgs.fta), 0), 3) AS ft_pct
+            FROM team_games tg
+            JOIN team_game_stats tgs ON tgs.game_id = tg.id AND tgs.team_id = %s
+            JOIN team_game_stats otgs ON otgs.game_id = tg.id AND otgs.team_id <> %s
+            """,
+            (
+                team_id,
+                team_id,
+                team_id,
+                season,
+                team_id,
+                team_id,
+                team_id,
+                season,
+                team_id,
+                team_id,
+            ),
+        )
+        row = cur.fetchone()
+        if not row or row["games_played"] == 0:
+            raise HTTPException(status_code=404, detail="No team stats found")
+        return TeamSeasonSummary(**row)
+
+
+@app.get(
+    "/api/teams/{team_id}/players",
+    response_model=TeamPlayerSummaryList,
+    tags=["Teams"],
+)
+def get_team_players(
+    team_id: int,
+    season: str = Query(..., description="Season (required)"),
+    limit: int = Query(15, ge=1, le=50),
+) -> TeamPlayerSummaryList:
+    with get_cursor() as cur:
+        cur.execute("SELECT 1 FROM teams WHERE id = %s", (team_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Team not found")
+
+        cur.execute(
+            """
+            SELECT
+                pgs.player_id,
+                p.full_name AS player_name,
+                COUNT(*) AS games_played,
+                ROUND(AVG(pgs.minutes), 1) AS mpg,
+                ROUND(AVG(pgs.points), 1) AS ppg,
+                ROUND(AVG(pgs.rebounds), 1) AS rpg,
+                ROUND(AVG(pgs.assists), 1) AS apg,
+                ROUND(AVG(pgs.steals), 1) AS spg,
+                ROUND(AVG(pgs.blocks), 1) AS bpg
+            FROM player_game_stats pgs
+            JOIN players p ON p.id = pgs.player_id
+            WHERE pgs.team_id = %s AND pgs.season = %s AND pgs.minutes IS NOT NULL
+            GROUP BY pgs.player_id, p.full_name
+            ORDER BY ppg DESC, games_played DESC, p.full_name
+            LIMIT %s
+            """,
+            (team_id, season, limit),
+        )
+        players = [TeamPlayerSummary(**row) for row in cur.fetchall()]
+        return TeamPlayerSummaryList(team_id=team_id, season=season, data=players)
+
+
 # === Players ===
 
 
@@ -150,31 +268,104 @@ def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
     with get_cursor() as cur:
         cur.execute(
             """
+            WITH latest_team AS (
+                SELECT DISTINCT ON (pgs.season)
+                    pgs.season,
+                    pgs.team_id,
+                    t.abbreviation AS team_abbr
+                FROM player_game_stats pgs
+                JOIN games g ON g.id = pgs.game_id
+                JOIN teams t ON t.id = pgs.team_id
+                WHERE pgs.player_id = %s AND pgs.minutes IS NOT NULL
+                ORDER BY pgs.season, g.game_date DESC NULLS LAST, g.id DESC
+            )
             SELECT
                 pgs.player_id,
-                p.full_name as player_name,
+                p.full_name AS player_name,
                 pgs.season,
-                COUNT(*) as games_played,
-                ROUND(AVG(pgs.points), 1) as ppg,
-                ROUND(AVG(pgs.rebounds), 1) as rpg,
-                ROUND(AVG(pgs.assists), 1) as apg,
-                ROUND(AVG(pgs.steals), 1) as spg,
-                ROUND(AVG(pgs.blocks), 1) as bpg,
-                ROUND(SUM(pgs.fgm)::NUMERIC / NULLIF(SUM(pgs.fga), 0), 3) as fg_pct,
-                ROUND(SUM(pgs.fg3m)::NUMERIC / NULLIF(SUM(pgs.fg3a), 0), 3) as fg3_pct,
-                ROUND(SUM(pgs.ftm)::NUMERIC / NULLIF(SUM(pgs.fta), 0), 3) as ft_pct
+                lt.team_id,
+                lt.team_abbr,
+                COUNT(*) AS games_played,
+                ROUND(AVG(pgs.minutes), 1) AS mpg,
+                ROUND(AVG(pgs.points), 1) AS ppg,
+                ROUND(AVG(pgs.rebounds), 1) AS rpg,
+                ROUND(AVG(pgs.assists), 1) AS apg,
+                ROUND(AVG(pgs.steals), 1) AS spg,
+                ROUND(AVG(pgs.blocks), 1) AS bpg,
+                ROUND(SUM(pgs.fgm)::NUMERIC / NULLIF(SUM(pgs.fga), 0), 3) AS fg_pct,
+                ROUND(SUM(pgs.fg3m)::NUMERIC / NULLIF(SUM(pgs.fg3a), 0), 3) AS fg3_pct,
+                ROUND(SUM(pgs.ftm)::NUMERIC / NULLIF(SUM(pgs.fta), 0), 3) AS ft_pct
             FROM player_game_stats pgs
             JOIN players p ON pgs.player_id = p.id
-            WHERE pgs.player_id = %s
-            GROUP BY pgs.player_id, p.full_name, pgs.season
+            JOIN latest_team lt ON lt.season = pgs.season
+            WHERE pgs.player_id = %s AND pgs.minutes IS NOT NULL
+            GROUP BY pgs.player_id, p.full_name, pgs.season, lt.team_id, lt.team_abbr
             ORDER BY pgs.season DESC
             """,
-            (player_id,),
+            (player_id, player_id),
         )
         rows = cur.fetchall()
         if not rows:
             raise HTTPException(status_code=404, detail="No stats found for player")
         return [PlayerSeasonAvg(**row) for row in rows]
+
+
+@app.get("/api/players/{player_id}/games", response_model=PlayerGameLog, tags=["Players"])
+def get_player_games(
+    player_id: int,
+    season: str = Query(..., description="Season (required)"),
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> PlayerGameLog:
+    with get_cursor() as cur:
+        cur.execute("SELECT 1 FROM players WHERE id = %s", (player_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Player not found")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM player_game_stats
+            WHERE player_id = %s AND season = %s AND minutes IS NOT NULL
+            """,
+            (player_id, season),
+        )
+        total = cur.fetchone()["count"]
+
+        cur.execute(
+            """
+            SELECT
+                pgs.*,
+                p.full_name AS player_name,
+                team.abbreviation AS team_abbr,
+                g.game_date,
+                opponent.id AS opponent_id,
+                opponent.full_name AS opponent_name,
+                opponent.abbreviation AS opponent_abbr,
+                g.home_team_id = pgs.team_id AS is_home,
+                CASE
+                    WHEN (g.home_team_id = pgs.team_id AND g.home_score > g.away_score)
+                      OR (g.away_team_id = pgs.team_id AND g.away_score > g.home_score)
+                    THEN 'W' ELSE 'L'
+                END AS result,
+                CASE WHEN g.home_team_id = pgs.team_id THEN g.home_score ELSE g.away_score END
+                    AS team_score,
+                CASE WHEN g.home_team_id = pgs.team_id THEN g.away_score ELSE g.home_score END
+                    AS opponent_score
+            FROM player_game_stats pgs
+            JOIN players p ON p.id = pgs.player_id
+            JOIN games g ON g.id = pgs.game_id
+            JOIN teams team ON team.id = pgs.team_id
+            JOIN teams opponent ON opponent.id = CASE
+                WHEN g.home_team_id = pgs.team_id THEN g.away_team_id ELSE g.home_team_id
+            END
+            WHERE pgs.player_id = %s AND pgs.season = %s AND pgs.minutes IS NOT NULL
+            ORDER BY g.game_date DESC NULLS LAST, g.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            (player_id, season, limit, offset),
+        )
+        return PlayerGameLog(data=cur.fetchall(), total=total, limit=limit, offset=offset)
 
 
 # === Games ===
@@ -241,8 +432,8 @@ def get_game(game_id: str) -> GameDetail:
         return GameDetail(**row)
 
 
-@app.get("/api/games/{game_id}/boxscore", tags=["Games"])
-def get_game_boxscore(game_id: str) -> dict:
+@app.get("/api/games/{game_id}/boxscore", response_model=GameBoxScore, tags=["Games"])
+def get_game_boxscore(game_id: str) -> GameBoxScore:
     with get_cursor() as cur:
         cur.execute(
             """
@@ -282,23 +473,23 @@ def get_game_boxscore(game_id: str) -> dict:
         )
         team_stats = cur.fetchall()
 
-        return {
-            "game": GameDetail(**game),
-            "home_players": [
+        return GameBoxScore(
+            game=GameDetail(**game),
+            home_players=[
                 PlayerGameStats(**p) for p in player_stats if p["team_id"] == game["home_team_id"]
             ],
-            "away_players": [
+            away_players=[
                 PlayerGameStats(**p) for p in player_stats if p["team_id"] == game["away_team_id"]
             ],
-            "home_team_stats": next(
+            home_team_stats=next(
                 (TeamGameStats(**t) for t in team_stats if t["team_id"] == game["home_team_id"]),
                 None,
             ),
-            "away_team_stats": next(
+            away_team_stats=next(
                 (TeamGameStats(**t) for t in team_stats if t["team_id"] == game["away_team_id"]),
                 None,
             ),
-        }
+        )
 
 
 # === Box Score Lists ===

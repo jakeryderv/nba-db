@@ -31,9 +31,12 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | `GET /api/seasons` | Loaded seasons |
 | `GET /api/teams` | All teams |
 | `GET /api/teams/{id}` | Team by ID |
+| `GET /api/teams/{id}/stats` | Team record, splits, and season averages |
+| `GET /api/teams/{id}/players` | Team player averages, ranked by scoring |
 | `GET /api/players` | Players (case-insensitive `?search=`, `?active=`, pagination) |
 | `GET /api/players/{id}` | Player by ID |
 | `GET /api/players/{id}/stats` | Player season averages |
+| `GET /api/players/{id}/games` | Paginated player game log |
 | `GET /api/games` | Games (filter by `?season=`, `?team_id=`) |
 | `GET /api/games/{id}` | Game by ID |
 | `GET /api/games/{id}/boxscore` | Full box score |
