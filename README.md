@@ -8,7 +8,7 @@ A read-only web app and REST API for exploring NBA statistics — standings, sta
 
 - **ETL pipeline** (`etl/`) downloads season data from the NBA API, transforms it to CSVs, and loads it into PostgreSQL. Loading is an operator task — the public app has no write capability.
 - **FastAPI app** (`app/`) serves a single-page dashboard and a read-only JSON API. In production it connects with a SELECT-only database role (`nba_readonly`).
-- **Schema** (`db/schema/`) is applied idempotently at deploy time by `scripts/init_db.py` (Railway `startCommand`), with CHECK constraints, indexes, and views.
+- **Schema** (`db/schema/`) is managed as numbered, checksum-tracked migrations by `scripts/init_db.py` (Railway `startCommand`), with CHECK constraints, indexes, and views.
 
 ## Tech Stack
 
@@ -93,7 +93,9 @@ make check       # ruff + mypy
 
 ## Deployment
 
-Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `scripts/init_db.py` applies the schema if missing and refreshes the read-only role, then uvicorn serves the app. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and `READONLY_DB_PASSWORD` on the service.
+Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `scripts/init_db.py` applies pending checksum-tracked schema migrations and refreshes the read-only role, then uvicorn serves the app. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and `READONLY_DB_PASSWORD` on the service.
+
+Schema migration files are immutable after they have been applied. To change the database, add the next numbered file under `db/schema/`; editing an applied file causes initialization to fail with a checksum error.
 
 ## Roadmap
 
