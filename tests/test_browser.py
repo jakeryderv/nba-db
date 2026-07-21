@@ -1,5 +1,6 @@
 """End-to-end browser coverage for the primary exploration paths."""
 
+import os
 import re
 import shutil
 import socket
@@ -66,14 +67,21 @@ def browser() -> Generator[Browser, None, None]:
 
 
 def _launch_browser(playwright: Playwright) -> Browser:
-    """Prefer Playwright's Chromium, with the workstation Chrome as a local fallback."""
+    """Use system Chrome when available, or a locally installed Playwright browser."""
+    chrome = (
+        shutil.which("google-chrome")
+        or shutil.which("google-chrome-stable")
+        or shutil.which("chromium")
+    )
+    if chrome:
+        return playwright.chromium.launch(headless=True, executable_path=chrome)
+
     try:
         return playwright.chromium.launch(headless=True)
     except Exception as exc:
-        chrome = shutil.which("google-chrome") or shutil.which("chromium")
-        if not chrome:
-            pytest.skip(f"No Chromium browser is installed: {exc}")
-        return playwright.chromium.launch(headless=True, executable_path=chrome)
+        if os.environ.get("CI"):
+            pytest.fail(f"CI runner has no usable Chromium browser: {exc}")
+        pytest.skip(f"No Chromium browser is installed: {exc}")
 
 
 @pytest.fixture
