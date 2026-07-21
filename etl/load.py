@@ -41,6 +41,89 @@ def get_connection():
     return psycopg.connect(**get_db_config())
 
 
+def read_clean_csv(filepath, game_id_column=None):
+    """Read a clean CSV without allowing pandas to coerce NBA game IDs to integers."""
+    dtype = {game_id_column: "string"} if game_id_column else None
+    return pd.read_csv(filepath, dtype=dtype)
+
+
+def migrate_legacy_game_ids(conn, official_game_ids):
+    """Replace pandas-truncated game IDs while preserving already-migrated data."""
+    mappings = sorted(
+        {
+            (game_id.lstrip("0") or "0", game_id)
+            for value in official_game_ids
+            if (game_id := str(value)) and game_id.lstrip("0") != game_id
+        }
+    )
+    if not mappings:
+        return
+
+    # Create canonical parent rows first so child foreign keys can be migrated.
+    # In a partially migrated database the canonical row wins conflicts; any
+    # child row that exists only under the legacy ID is copied across.
+    official_legacy = [(official, legacy) for legacy, official in mappings]
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO games (
+                id, game_date, season, home_team_id, away_team_id, home_score, away_score
+            )
+            SELECT %s, game_date, season, home_team_id, away_team_id, home_score, away_score
+            FROM games
+            WHERE id = %s
+            ON CONFLICT (id) DO NOTHING
+            """,
+            official_legacy,
+        )
+        cur.executemany(
+            """
+            INSERT INTO team_game_stats (
+                game_id, team_id, season, is_home,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            )
+            SELECT
+                %s, team_id, season, is_home,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            FROM team_game_stats
+            WHERE game_id = %s
+            ON CONFLICT (game_id, team_id) DO NOTHING
+            """,
+            official_legacy,
+        )
+        cur.executemany(
+            """
+            INSERT INTO player_game_stats (
+                game_id, player_id, team_id, season,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            )
+            SELECT
+                %s, player_id, team_id, season,
+                minutes, points, rebounds, offensive_rebounds, defensive_rebounds,
+                assists, steals, blocks, turnovers, personal_fouls,
+                fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                ftm, fta, ft_pct, plus_minus
+            FROM player_game_stats
+            WHERE game_id = %s
+            ON CONFLICT (game_id, player_id) DO NOTHING
+            """,
+            official_legacy,
+        )
+        legacy_only = [(legacy,) for legacy, _official in mappings]
+        cur.executemany("DELETE FROM player_game_stats WHERE game_id = %s", legacy_only)
+        cur.executemany("DELETE FROM team_game_stats WHERE game_id = %s", legacy_only)
+        cur.executemany("DELETE FROM games WHERE id = %s", legacy_only)
+
+
 def load_teams(conn):
     """Load teams from shared CSV."""
     print("\n=== Teams ===")
@@ -49,7 +132,7 @@ def load_teams(conn):
         print("  Skipping: teams.csv not found")
         return
 
-    df = pd.read_csv(filepath)
+    df = read_clean_csv(filepath)
     with conn.cursor() as cur:
         values = [
             tuple(None if pd.isna(v) else v for v in row)
@@ -59,12 +142,17 @@ def load_teams(conn):
             """
             INSERT INTO teams (id, full_name, abbreviation, nickname, city, state, year_founded)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                full_name = EXCLUDED.full_name,
+                abbreviation = EXCLUDED.abbreviation,
+                nickname = EXCLUDED.nickname,
+                city = EXCLUDED.city,
+                state = EXCLUDED.state,
+                year_founded = EXCLUDED.year_founded
             """,
             values,
         )
-    conn.commit()
-    print(f"    Loaded {len(df)} teams")
+    print(f"    Upserted {len(df)} teams")
 
 
 def load_players(conn):
@@ -75,7 +163,7 @@ def load_players(conn):
         print("  Skipping: players.csv not found")
         return
 
-    df = pd.read_csv(filepath)
+    df = read_clean_csv(filepath)
     with conn.cursor() as cur:
         values = [
             tuple(None if pd.isna(v) else v for v in row)
@@ -85,12 +173,15 @@ def load_players(conn):
             """
             INSERT INTO players (id, full_name, first_name, last_name, is_active)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                full_name = EXCLUDED.full_name,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                is_active = EXCLUDED.is_active
             """,
             values,
         )
-    conn.commit()
-    print(f"    Loaded {len(df)} players")
+    print(f"    Upserted {len(df)} players")
 
 
 def load_games(conn, season):
@@ -101,8 +192,9 @@ def load_games(conn, season):
         print("  Skipping: games.csv not found")
         return
 
-    df = pd.read_csv(filepath)
+    df = read_clean_csv(filepath, "id")
     df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date
+    migrate_legacy_game_ids(conn, df["id"].dropna())
 
     with conn.cursor() as cur:
         values = [
@@ -113,12 +205,17 @@ def load_games(conn, season):
             """
             INSERT INTO games (id, game_date, season, home_team_id, away_team_id, home_score, away_score)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                game_date = EXCLUDED.game_date,
+                season = EXCLUDED.season,
+                home_team_id = EXCLUDED.home_team_id,
+                away_team_id = EXCLUDED.away_team_id,
+                home_score = EXCLUDED.home_score,
+                away_score = EXCLUDED.away_score
             """,
             values,
         )
-    conn.commit()
-    print(f"    Loaded {len(df)} games")
+    print(f"    Upserted {len(df)} games")
 
 
 def load_team_game_stats(conn, season):
@@ -129,7 +226,7 @@ def load_team_game_stats(conn, season):
         print("  Skipping: team_game_stats.csv not found")
         return
 
-    df = pd.read_csv(filepath)
+    df = read_clean_csv(filepath, "game_id")
     columns = [
         "game_id",
         "team_id",
@@ -173,12 +270,33 @@ def load_team_game_stats(conn, season):
                 ftm, fta, ft_pct, plus_minus
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (game_id, team_id) DO NOTHING
+            ON CONFLICT (game_id, team_id) DO UPDATE SET
+                season = EXCLUDED.season,
+                is_home = EXCLUDED.is_home,
+                minutes = EXCLUDED.minutes,
+                points = EXCLUDED.points,
+                rebounds = EXCLUDED.rebounds,
+                offensive_rebounds = EXCLUDED.offensive_rebounds,
+                defensive_rebounds = EXCLUDED.defensive_rebounds,
+                assists = EXCLUDED.assists,
+                steals = EXCLUDED.steals,
+                blocks = EXCLUDED.blocks,
+                turnovers = EXCLUDED.turnovers,
+                personal_fouls = EXCLUDED.personal_fouls,
+                fgm = EXCLUDED.fgm,
+                fga = EXCLUDED.fga,
+                fg_pct = EXCLUDED.fg_pct,
+                fg3m = EXCLUDED.fg3m,
+                fg3a = EXCLUDED.fg3a,
+                fg3_pct = EXCLUDED.fg3_pct,
+                ftm = EXCLUDED.ftm,
+                fta = EXCLUDED.fta,
+                ft_pct = EXCLUDED.ft_pct,
+                plus_minus = EXCLUDED.plus_minus
             """,
             values,
         )
-    conn.commit()
-    print(f"    Loaded {len(df)} team game stats")
+    print(f"    Upserted {len(df)} team game stats")
 
 
 def load_player_game_stats(conn, season):
@@ -189,7 +307,7 @@ def load_player_game_stats(conn, season):
         print("  Skipping: player_game_stats.csv not found")
         return
 
-    df = pd.read_csv(filepath)
+    df = read_clean_csv(filepath, "game_id")
     columns = [
         "game_id",
         "player_id",
@@ -233,12 +351,33 @@ def load_player_game_stats(conn, season):
                 ftm, fta, ft_pct, plus_minus
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (game_id, player_id) DO NOTHING
+            ON CONFLICT (game_id, player_id) DO UPDATE SET
+                team_id = EXCLUDED.team_id,
+                season = EXCLUDED.season,
+                minutes = EXCLUDED.minutes,
+                points = EXCLUDED.points,
+                rebounds = EXCLUDED.rebounds,
+                offensive_rebounds = EXCLUDED.offensive_rebounds,
+                defensive_rebounds = EXCLUDED.defensive_rebounds,
+                assists = EXCLUDED.assists,
+                steals = EXCLUDED.steals,
+                blocks = EXCLUDED.blocks,
+                turnovers = EXCLUDED.turnovers,
+                personal_fouls = EXCLUDED.personal_fouls,
+                fgm = EXCLUDED.fgm,
+                fga = EXCLUDED.fga,
+                fg_pct = EXCLUDED.fg_pct,
+                fg3m = EXCLUDED.fg3m,
+                fg3a = EXCLUDED.fg3a,
+                fg3_pct = EXCLUDED.fg3_pct,
+                ftm = EXCLUDED.ftm,
+                fta = EXCLUDED.fta,
+                ft_pct = EXCLUDED.ft_pct,
+                plus_minus = EXCLUDED.plus_minus
             """,
             values,
         )
-    conn.commit()
-    print(f"    Loaded {len(df)} player game stats")
+    print(f"    Upserted {len(df)} player game stats")
 
 
 def update_season_metadata(conn, season):
@@ -246,8 +385,18 @@ def update_season_metadata(conn, season):
     print("\n=== Season Metadata ===")
     with conn.cursor() as cur:
         cur.execute("CALL sp_update_season_metadata(%s)", (season,))
-    conn.commit()
     print(f"    Updated metadata for {season}")
+
+
+def load_season(conn, season):
+    """Load shared and season data atomically."""
+    with conn.transaction():
+        load_teams(conn)
+        load_players(conn)
+        load_games(conn, season)
+        load_team_game_stats(conn, season)
+        load_player_game_stats(conn, season)
+        update_season_metadata(conn, season)
 
 
 def main():
@@ -264,12 +413,7 @@ def main():
 
     conn = get_connection()
     try:
-        load_teams(conn)
-        load_players(conn)
-        load_games(conn, season)
-        load_team_game_stats(conn, season)
-        load_player_game_stats(conn, season)
-        update_season_metadata(conn, season)
+        load_season(conn, season)
     finally:
         conn.close()
 

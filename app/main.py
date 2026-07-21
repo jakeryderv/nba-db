@@ -160,9 +160,9 @@ def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
                 ROUND(AVG(pgs.assists), 1) as apg,
                 ROUND(AVG(pgs.steals), 1) as spg,
                 ROUND(AVG(pgs.blocks), 1) as bpg,
-                ROUND(AVG(pgs.fg_pct), 3) as fg_pct,
-                ROUND(AVG(pgs.fg3_pct), 3) as fg3_pct,
-                ROUND(AVG(pgs.ft_pct), 3) as ft_pct
+                ROUND(SUM(pgs.fgm)::NUMERIC / NULLIF(SUM(pgs.fga), 0), 3) as fg_pct,
+                ROUND(SUM(pgs.fg3m)::NUMERIC / NULLIF(SUM(pgs.fg3a), 0), 3) as fg3_pct,
+                ROUND(SUM(pgs.ftm)::NUMERIC / NULLIF(SUM(pgs.fta), 0), 3) as ft_pct
             FROM player_game_stats pgs
             JOIN players p ON pgs.player_id = p.id
             WHERE pgs.player_id = %s
