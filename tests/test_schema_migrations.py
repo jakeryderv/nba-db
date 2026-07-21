@@ -17,14 +17,8 @@ def test_existing_database_is_adopted_and_safe_to_reapply(client):
         init_db.apply_schema(conn)
         with conn.cursor() as cur:
             cur.execute("SELECT filename FROM schema_migrations ORDER BY filename")
-            assert [row[0] for row in cur.fetchall()] == [
-                "01_tables.sql",
-                "02_constraints.sql",
-                "03_indexes.sql",
-                "04_triggers.sql",
-                "05_views.sql",
-                "06_procedures.sql",
-            ]
+            expected = sorted(path.name for path in init_db.SCHEMA_DIR.glob("*.sql"))
+            assert [row[0] for row in cur.fetchall()] == expected
             cur.execute("SELECT COUNT(*) FROM teams")
             row = cur.fetchone()
             assert row is not None
