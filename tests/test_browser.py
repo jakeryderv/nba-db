@@ -13,7 +13,7 @@ import pytest
 import uvicorn
 from playwright.sync_api import Browser, Page, Playwright, expect, sync_playwright
 
-from tests.conftest import LAKERS, LEBRON
+from tests.conftest import CELTICS, LAKERS, LEBRON, TATUM
 
 
 @pytest.fixture(scope="module")
@@ -148,3 +148,33 @@ def test_team_dashboard_collapses_to_one_column_on_mobile(page: Page, live_url: 
         "element => getComputedStyle(element).gridTemplateColumns"
     )
     assert len(columns.split()) == 1
+
+
+def test_compare_players_shows_metrics_and_recent_trends(page: Page, live_url: str) -> None:
+    page.goto(f"{live_url}/#compare")
+    page.locator("#compare-player-one").select_option(str(LEBRON))
+    page.locator("#compare-player-two").select_option(str(TATUM))
+    page.get_by_role("button", name="Compare players").click()
+
+    expect(page).to_have_url(re.compile(rf"#compare/players/{LEBRON}/{TATUM}$"))
+    result = page.locator("#player-comparison-result")
+    expect(result.get_by_role("heading", name="LeBron James")).to_be_visible()
+    expect(result.get_by_role("heading", name="Jayson Tatum")).to_be_visible()
+    lebron_card = result.locator(".comparison-card").filter(has_text="LeBron James")
+    expect(lebron_card.get_by_text("30", exact=True)).to_be_visible()
+    expect(result.get_by_role("img", name=re.compile("LeBron James points"))).to_be_visible()
+
+
+def test_compare_teams_shows_head_to_head(page: Page, live_url: str) -> None:
+    page.goto(f"{live_url}/#compare")
+    page.get_by_role("tab", name="Teams").click()
+    page.locator("#compare-team-one").select_option(str(LAKERS))
+    page.locator("#compare-team-two").select_option(str(CELTICS))
+    page.get_by_role("button", name="Compare teams").click()
+
+    expect(page).to_have_url(re.compile(rf"#compare/teams/{LAKERS}/{CELTICS}$"))
+    result = page.locator("#team-comparison-result")
+    expect(result.get_by_role("heading", name="Los Angeles Lakers")).to_be_visible()
+    expect(result.get_by_role("heading", name="Boston Celtics")).to_be_visible()
+    expect(result.get_by_role("heading", name="Head-to-head")).to_be_visible()
+    expect(result.get_by_text("10 games", exact=False)).to_be_visible()

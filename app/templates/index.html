@@ -570,6 +570,97 @@
             gap: 1rem;
             margin-bottom: 1.5rem;
         }
+
+        /* Comparisons */
+        .compare-controls {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr) auto;
+            gap: 0.75rem;
+            align-items: end;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .compare-field {
+            display: grid;
+            gap: 0.4rem;
+        }
+        .compare-field label {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .compare-versus {
+            align-self: center;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+        .primary-button {
+            padding: 0.65rem 1rem;
+            color: #fff;
+            background: var(--accent);
+            border: 0;
+            border-radius: 8px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .primary-button:hover, .primary-button:focus-visible { background: var(--accent-light); }
+        .compare-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .compare-tab {
+            padding: 0.55rem 0.9rem;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font: inherit;
+            cursor: pointer;
+        }
+        .compare-tab.active { color: var(--text); border-color: var(--accent); }
+        .compare-panel[hidden] { display: none; }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .comparison-card {
+            padding: 1.25rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .comparison-card h3 { margin-bottom: 0.25rem; }
+        .comparison-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin-top: 1rem;
+        }
+        .comparison-metric {
+            padding: 0.65rem;
+            text-align: center;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+        .comparison-metric strong { display: block; font-size: 1.15rem; }
+        .comparison-metric span { color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; }
+        .trend-chart { width: 100%; height: 90px; margin-top: 0.75rem; }
+        .trend-line { fill: none; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; }
+        .trend-axis { stroke: var(--border); stroke-width: 1; }
+        .head-to-head {
+            margin-top: 1rem;
+            padding: 1rem;
+            text-align: center;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
         .stat-box {
             background: var(--bg-tertiary);
             border-radius: 10px;
@@ -704,6 +795,9 @@
                 min-height: 100vh;
                 border-radius: 0;
             }
+            .compare-controls { grid-template-columns: 1fr; }
+            .compare-versus { display: none; }
+            .comparison-grid { grid-template-columns: 1fr; }
         }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
@@ -755,6 +849,12 @@
                     Players
                 </a>
             </li>
+            <li>
+                <a href="#compare" class="nav-link" data-section="compare">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3L4 7l4 4M4 7h16M16 21l4-4-4-4m4 4H4"/></svg>
+                    Compare
+                </a>
+            </li>
         </ul>
     </nav>
 
@@ -772,7 +872,7 @@
         <!-- Leaders -->
         <section id="leaders" class="section">
             <div class="section-header">
-                <h2 class="section-title">League Leaders</h2>
+                <h2 class="section-title">League Leaders <span id="leaders-info"></span></h2>
                 <div class="controls">
                     <select id="leaders-stat" class="filter-select" aria-label="Leader statistic">
                         <option value="points">Points</option>
@@ -826,6 +926,35 @@
             <div class="pagination" id="players-pagination"></div>
         </section>
 
+        <!-- Comparisons -->
+        <section id="compare" class="section">
+            <div class="section-header">
+                <h2 class="section-title">Compare</h2>
+            </div>
+            <div class="compare-tabs" role="tablist" aria-label="Comparison type">
+                <button class="compare-tab active" id="player-compare-tab" role="tab" aria-selected="true" aria-controls="player-compare-panel" data-action="compare-tab" data-compare-type="players">Players</button>
+                <button class="compare-tab" id="team-compare-tab" role="tab" aria-selected="false" aria-controls="team-compare-panel" data-action="compare-tab" data-compare-type="teams">Teams</button>
+            </div>
+            <div class="compare-panel" id="player-compare-panel" role="tabpanel" aria-labelledby="player-compare-tab">
+                <form class="compare-controls" id="player-compare-form">
+                    <div class="compare-field"><label for="compare-player-one">First player</label><select class="filter-select" id="compare-player-one" required><option value="">Select a player</option></select></div>
+                    <span class="compare-versus">VS</span>
+                    <div class="compare-field"><label for="compare-player-two">Second player</label><select class="filter-select" id="compare-player-two" required><option value="">Select a player</option></select></div>
+                    <button class="primary-button" type="submit">Compare players</button>
+                </form>
+                <div id="player-comparison-result" aria-live="polite"></div>
+            </div>
+            <div class="compare-panel" id="team-compare-panel" role="tabpanel" aria-labelledby="team-compare-tab" hidden>
+                <form class="compare-controls" id="team-compare-form">
+                    <div class="compare-field"><label for="compare-team-one">First team</label><select class="filter-select" id="compare-team-one" required><option value="">Select a team</option></select></div>
+                    <span class="compare-versus">VS</span>
+                    <div class="compare-field"><label for="compare-team-two">Second team</label><select class="filter-select" id="compare-team-two" required><option value="">Select a team</option></select></div>
+                    <button class="primary-button" type="submit">Compare teams</button>
+                </form>
+                <div id="team-comparison-result" aria-live="polite"></div>
+            </div>
+        </section>
+
     </main>
 
     <!-- Player Modal -->
@@ -862,9 +991,9 @@
     </div>
 
     <script>
-        let season = null, teams = [], ready = false, activeSection = 'standings';
+        let season = null, teams = [], comparisonPlayers = [], ready = false, activeSection = 'standings';
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
-        const sections = new Set(['standings', 'leaders', 'games', 'players']);
+        const sections = new Set(['standings', 'leaders', 'games', 'players', 'compare']);
 
         const HTML_ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
 
@@ -912,6 +1041,14 @@
             document.getElementById('games-team').onchange = loadGames;
             document.getElementById('games-sort').onchange = loadGames;
             document.getElementById('leaders-stat').onchange = loadLeaders;
+            document.getElementById('player-compare-form').onsubmit = event => {
+                event.preventDefault();
+                navigateComparison('players');
+            };
+            document.getElementById('team-compare-form').onsubmit = event => {
+                event.preventDefault();
+                navigateComparison('teams');
+            };
 
             document.querySelectorAll('.modal-overlay').forEach(m => {
                 m.onclick = e => { if(e.target === m) closeDetail(); };
@@ -932,6 +1069,7 @@
                 if (!target) return;
                 const actions = {
                     paginate: () => paginate(target.dataset.key, Number(target.dataset.direction)),
+                    'compare-tab': () => showCompareType(target.dataset.compareType),
                     'close-modal': () => closeDetail()
                 };
                 actions[target.dataset.action]?.();
@@ -955,6 +1093,9 @@
                     return option;
                 }));
 
+                comparisonPlayers = (await api('/api/players?active=true&limit=500')).data;
+                populateComparisonSelects();
+
                 ready = true;
                 if (!window.location.hash) history.replaceState(null, '', '#standings');
                 route();
@@ -971,13 +1112,23 @@
         }
 
         function parseRoute() {
-            const [kind, id] = window.location.hash.slice(1).split('/');
-            return {kind: kind || 'standings', id: id ? decodeURIComponent(id) : null};
+            const [kind, ...parts] = window.location.hash.slice(1).split('/');
+            return {kind: kind || 'standings', parts: parts.map(decodeURIComponent)};
         }
 
         function route() {
             if (!ready) return;
-            const {kind, id} = parseRoute();
+            const {kind, parts} = parseRoute();
+            const id = parts[0] || null;
+            if (kind === 'compare' && parts.length === 3 && ['players', 'teams'].includes(parts[0])) {
+                activeSection = 'compare';
+                closeModals();
+                switchTo('compare', false);
+                showCompareType(parts[0]);
+                setComparisonSelection(parts[0], parts[1], parts[2]);
+                loadComparison(parts[0], parts[1], parts[2]);
+                return;
+            }
             if (sections.has(kind)) {
                 activeSection = kind;
                 closeModals();
@@ -992,15 +1143,151 @@
             route();
         }
 
-        function switchTo(s) {
+        function switchTo(s, load = true) {
             document.querySelectorAll('.nav-link').forEach(a => a.classList.toggle('active', a.dataset.section === s));
             document.querySelectorAll('.section').forEach(sec => sec.classList.toggle('active', sec.id === s));
-            loadSection(s);
+            if (load) loadSection(s);
         }
 
         function loadSection(s) {
             s = s || document.querySelector('.nav-link.active').dataset.section;
-            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers})[s]();
+            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers, compare:loadCompare})[s]();
+        }
+
+        function populateComparisonSelects() {
+            const fill = (id, rows, label) => {
+                const select = document.getElementById(id);
+                const prompt = document.createElement('option');
+                prompt.value = '';
+                prompt.textContent = `Select a ${label}`;
+                select.replaceChildren(prompt, ...rows.map(row => {
+                    const option = document.createElement('option');
+                    option.value = row.id;
+                    option.textContent = row.full_name;
+                    return option;
+                }));
+            };
+            ['compare-player-one', 'compare-player-two'].forEach(id => fill(id, comparisonPlayers, 'player'));
+            ['compare-team-one', 'compare-team-two'].forEach(id => fill(id, teams, 'team'));
+        }
+
+        function showCompareType(type) {
+            const playerMode = type !== 'teams';
+            document.getElementById('player-compare-panel').hidden = !playerMode;
+            document.getElementById('team-compare-panel').hidden = playerMode;
+            document.querySelectorAll('.compare-tab').forEach(tab => {
+                const selected = tab.dataset.compareType === (playerMode ? 'players' : 'teams');
+                tab.classList.toggle('active', selected);
+                tab.setAttribute('aria-selected', String(selected));
+            });
+        }
+
+        function loadCompare() {
+            showCompareType('players');
+        }
+
+        function navigateComparison(type) {
+            const prefix = type === 'players' ? 'compare-player' : 'compare-team';
+            const first = document.getElementById(`${prefix}-one`).value;
+            const second = document.getElementById(`${prefix}-two`).value;
+            const result = document.getElementById(`${type === 'players' ? 'player' : 'team'}-comparison-result`);
+            if (!first || !second || first === second) {
+                showStatus(result, 'error', `Select two distinct ${type}.`);
+                return;
+            }
+            window.location.hash = `compare/${type}/${encodeURIComponent(first)}/${encodeURIComponent(second)}`;
+        }
+
+        function setComparisonSelection(type, first, second) {
+            const prefix = type === 'players' ? 'compare-player' : 'compare-team';
+            document.getElementById(`${prefix}-one`).value = first;
+            document.getElementById(`${prefix}-two`).value = second;
+        }
+
+        async function loadComparison(type, first, second) {
+            const result = document.getElementById(`${type === 'players' ? 'player' : 'team'}-comparison-result`);
+            showLoading(result, `${type} comparison`);
+            try {
+                if (type === 'players') await renderPlayerComparison(result, first, second);
+                else await renderTeamComparison(result, first, second);
+            } catch (error) {
+                showError(result, `${type} comparison`, error);
+            }
+        }
+
+        function comparisonMetrics(metrics) {
+            return `<div class="comparison-metrics">${metrics.map(([label, value]) => `
+                <div class="comparison-metric"><strong>${h(present(value))}</strong><span>${h(label)}</span></div>
+            `).join('')}</div>`;
+        }
+
+        function trendChart(games, name) {
+            const values = [...games].reverse().map(game => Number(game.points));
+            if (!values.length) return '<p class="detail-meta">No recent games available.</p>';
+            const max = Math.max(...values, 1), width = 300, height = 70, pad = 5;
+            const points = values.map((value, index) => {
+                const x = values.length === 1 ? width / 2 : pad + index * (width - pad * 2) / (values.length - 1);
+                const y = height - pad - value / max * (height - pad * 2);
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+            }).join(' ');
+            return `<svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${h(name)} points over the last ${values.length} games">
+                <line class="trend-axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"></line>
+                <polyline class="trend-line" points="${points}"></polyline>
+            </svg>`;
+        }
+
+        async function renderPlayerComparison(container, first, second) {
+            const params = new URLSearchParams({season});
+            params.append('player_ids', first);
+            params.append('player_ids', second);
+            const [comparison, firstGames, secondGames] = await Promise.all([
+                api(`/api/comparisons/players?${params}`),
+                api(`/api/players/${encodeURIComponent(first)}/games?${new URLSearchParams({season, limit: 10})}`),
+                api(`/api/players/${encodeURIComponent(second)}/games?${new URLSearchParams({season, limit: 10})}`)
+            ]);
+            const logs = [firstGames.data, secondGames.data];
+            container.innerHTML = `<div class="comparison-grid">${comparison.data.map((player, index) => `
+                <article class="comparison-card">
+                    <h3><a class="clickable" href="#player/${encodeURIComponent(player.player_id)}" data-action="player">${h(player.player_name)}</a></h3>
+                    <p class="detail-meta">${h(player.team_abbr)} &middot; ${h(season)} Regular Season</p>
+                    ${comparisonMetrics([
+                        ['GP', player.games_played], ['MPG', player.mpg], ['PPG', player.ppg],
+                        ['RPG', player.rpg], ['APG', player.apg], ['SPG', player.spg],
+                        ['BPG', player.bpg], ['FG%', pct(player.fg_pct)], ['3P%', pct(player.fg3_pct)],
+                        ['FT%', pct(player.ft_pct)]
+                    ])}
+                    <h4 class="section-subtitle">Recent scoring trend</h4>
+                    ${trendChart(logs[index], player.player_name)}
+                </article>
+            `).join('')}</div>`;
+        }
+
+        async function renderTeamComparison(container, first, second) {
+            const params = new URLSearchParams({season});
+            params.append('team_ids', first);
+            params.append('team_ids', second);
+            const comparison = await api(`/api/comparisons/teams?${params}`);
+            const cards = comparison.data.map(entry => {
+                const team = entry.team, stats = entry.stats;
+                return `<article class="comparison-card">
+                    <h3><a class="clickable" href="#team/${encodeURIComponent(team.id)}" data-action="team">${h(team.full_name)}</a></h3>
+                    <p class="detail-meta">${h(season)} Regular Season</p>
+                    ${comparisonMetrics([
+                        ['Record', `${stats.wins}-${stats.losses}`], ['Win%', pct(stats.win_pct)], ['PPG', stats.ppg],
+                        ['Opp PPG', stats.opponent_ppg], ['Point diff', stats.point_diff], ['RPG', stats.rpg],
+                        ['APG', stats.apg], ['eFG%', pct(stats.efg_pct)], ['FG%', pct(stats.fg_pct)],
+                        ['3P%', pct(stats.fg3_pct)], ['Last 10', `${stats.last_10_wins}-${stats.last_10_losses}`]
+                    ])}
+                </article>`;
+            }).join('');
+            const h2h = comparison.head_to_head;
+            const [firstTeam, secondTeam] = comparison.data.map(entry => entry.team);
+            container.innerHTML = `<div class="comparison-grid">${cards}</div>
+                <div class="head-to-head">
+                    <h3>Head-to-head</h3>
+                    <p>${h(h2h.games_played)} games &middot; ${h(firstTeam.abbreviation)} ${h(h2h.first_team_wins)}-${h(h2h.second_team_wins)} ${h(secondTeam.abbreviation)}</p>
+                    <p class="detail-meta">Average score: ${h(firstTeam.abbreviation)} ${h(h2h.first_team_ppg)} &middot; ${h(secondTeam.abbreviation)} ${h(h2h.second_team_ppg)}</p>
+                </div>`;
         }
 
         async function loadStandings() {
@@ -1031,6 +1318,7 @@
             showLoading(c, 'leaders');
             try {
                 const d = await api(`/api/leaders/${encodeURIComponent(stat)}?${new URLSearchParams({season, limit: 12})}`);
+                document.getElementById('leaders-info').textContent = `(minimum ${d.minimum_games} games)`;
                 c.innerHTML = d.data.map(p => `
                     <div class="stat-card">
                         <div class="stat-card-header">
@@ -1308,6 +1596,7 @@
                         <div class="stat-box"><div class="stat-box-value">${h(pct(summary.win_pct))}</div><div class="stat-box-label">Win%</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(summary.ppg)}</div><div class="stat-box-label">PPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(summary.opponent_ppg)}</div><div class="stat-box-label">Opp PPG</div></div>
+                        <div class="stat-box"><div class="stat-box-value">${summary.point_diff > 0 ? '+' : ''}${h(summary.point_diff)}</div><div class="stat-box-label">Point Diff</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(summary.rpg)}</div><div class="stat-box-label">RPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(summary.apg)}</div><div class="stat-box-label">APG</div></div>
                     </div>
@@ -1318,6 +1607,8 @@
                                 <tbody>
                                     <tr><th>Home</th><td class="num">${h(summary.home_wins)}-${h(summary.home_losses)}</td></tr>
                                     <tr><th>Away</th><td class="num">${h(summary.away_wins)}-${h(summary.away_losses)}</td></tr>
+                                    <tr><th>Last 10</th><td class="num">${h(summary.last_10_wins)}-${h(summary.last_10_losses)}</td></tr>
+                                    <tr><th>eFG%</th><td class="num">${h(pct(summary.efg_pct))}</td></tr>
                                     <tr><th>FG%</th><td class="num">${h(pct(summary.fg_pct))}</td></tr>
                                     <tr><th>3P%</th><td class="num">${h(pct(summary.fg3_pct))}</td></tr>
                                     <tr><th>FT%</th><td class="num">${h(pct(summary.ft_pct))}</td></tr>
