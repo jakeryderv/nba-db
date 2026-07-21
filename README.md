@@ -93,7 +93,7 @@ make check       # ruff + mypy
 
 ## Deployment
 
-Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `scripts/init_db.py` applies the schema if missing and refreshes the read-only role, then uvicorn serves the app. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and `READONLY_DB_PASSWORD` on the service.
+Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `scripts/init_db.py` applies pending checksum-tracked schema migrations and refreshes the read-only role, then uvicorn serves the app. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and `READONLY_DB_PASSWORD` on the service.
 
 ## Roadmap
 
