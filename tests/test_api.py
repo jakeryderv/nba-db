@@ -1,5 +1,7 @@
 """API tests against the seeded nba_db_test database."""
 
+from contextlib import contextmanager
+
 from tests.conftest import CELTICS, JORDAN, LAKERS, LEBRON, SEED_SEASON, TATUM
 
 
@@ -7,6 +9,21 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "healthy", "database": "connected"}
+
+
+def test_health_does_not_expose_database_error(client, monkeypatch):
+    @contextmanager
+    def broken_cursor():
+        raise RuntimeError("secret connection details")
+        yield
+
+    monkeypatch.setattr("app.main.get_cursor", broken_cursor)
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Database unavailable"}
+    assert "secret connection details" not in response.text
 
 
 class TestAdminEndpointsRemoved:

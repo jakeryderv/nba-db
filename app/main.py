@@ -1,5 +1,6 @@
 """NBA Database API - FastAPI Application."""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -24,6 +25,8 @@ from app.models import (
     TeamGameStatsList,
     TeamStanding,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -62,8 +65,9 @@ def health_check() -> dict:
         with get_cursor() as cur:
             cur.execute("SELECT 1")
         return {"status": "healthy", "database": "connected"}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Database error: {e}") from e
+    except Exception as exc:
+        logger.exception("Database health check failed")
+        raise HTTPException(status_code=503, detail="Database unavailable") from exc
 
 
 # === Seasons ===

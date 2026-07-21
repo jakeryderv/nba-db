@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Initialize database schema from SQL files."""
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -50,32 +51,58 @@ def split_sql(sql: str) -> list[str]:
     return statements
 
 
-def schema_is_initialized(conn) -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = 'teams'
-            )
-            """
-        )
-        return bool(cur.fetchone()[0])
-
-
 def apply_schema(conn: psycopg.Connection) -> None:
+    """Apply new or changed schema files and record their checksums.
+
+    Schema files are written to be idempotent so an existing database can be
+    brought under migration tracking on its first run. Adding a numbered SQL
+    file, or deliberately changing one, causes it to be applied transactionally.
+    """
     sql_files = sorted(SCHEMA_DIR.glob("*.sql"))
     if not sql_files:
         raise FileNotFoundError(f"No SQL files found in {SCHEMA_DIR}")
 
-    with conn.cursor() as cur:
-        for sql_file in sql_files:
-            print(f"Applying {sql_file.name}...")
-            for statement in split_sql(sql_file.read_text()):
-                cur.execute(statement)
-    conn.commit()
-    print("Schema initialized successfully.")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    filename TEXT PRIMARY KEY,
+                    checksum TEXT NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for sql_file in sql_files:
+                contents = sql_file.read_text()
+                checksum = hashlib.sha256(contents.encode()).hexdigest()
+                cur.execute(
+                    "SELECT checksum FROM schema_migrations WHERE filename = %s",
+                    (sql_file.name,),
+                )
+                row = cur.fetchone()
+                if row and row[0] == checksum:
+                    print(f"Skipping {sql_file.name} (already applied).")
+                    continue
+
+                print(f"Applying {sql_file.name}...")
+                for statement in split_sql(contents):
+                    cur.execute(statement)
+                cur.execute(
+                    """
+                    INSERT INTO schema_migrations (filename, checksum, applied_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (filename) DO UPDATE SET
+                        checksum = EXCLUDED.checksum,
+                        applied_at = EXCLUDED.applied_at
+                    """,
+                    (sql_file.name, checksum),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    print("Schema is up to date.")
 
 
 def ensure_readonly_role(conn: psycopg.Connection) -> None:
@@ -84,31 +111,37 @@ def ensure_readonly_role(conn: psycopg.Connection) -> None:
     if not password:
         print("READONLY_DB_PASSWORD not set, skipping read-only role setup.")
         return
+    role_name = os.getenv("READONLY_DB_USER", "nba_readonly")
 
     with conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'nba_readonly'")
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role_name,))
         action = "ALTER" if cur.fetchone() else "CREATE"
         cur.execute(
-            sql.SQL("{} ROLE nba_readonly LOGIN PASSWORD {}").format(
-                sql.SQL(action), sql.Literal(password)
+            sql.SQL("{} ROLE {} LOGIN PASSWORD {}").format(
+                sql.SQL(action), sql.Identifier(role_name), sql.Literal(password)
             )
         )
-        cur.execute("GRANT USAGE ON SCHEMA public TO nba_readonly")
-        cur.execute("GRANT SELECT ON ALL TABLES IN SCHEMA public TO nba_readonly")
         cur.execute(
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO nba_readonly"
+            sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role_name))
+        )
+        cur.execute(
+            sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(
+                sql.Identifier(role_name)
+            )
+        )
+        cur.execute(
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {}"
+            ).format(sql.Identifier(role_name))
         )
     conn.commit()
-    print("Read-only role nba_readonly is configured.")
+    print(f"Read-only role {role_name} is configured.")
 
 
 def main() -> None:
     conn = psycopg.connect(**get_db_config())
     try:
-        if schema_is_initialized(conn):
-            print("Schema already initialized, skipping.")
-        else:
-            apply_schema(conn)
+        apply_schema(conn)
         ensure_readonly_role(conn)
     finally:
         conn.close()

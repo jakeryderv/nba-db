@@ -2,9 +2,9 @@
 
 import os
 from typing import Any
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 load_dotenv()
 
@@ -13,18 +13,15 @@ def get_db_config(readonly: bool = False) -> dict[str, Any]:
     """Return PostgreSQL connection parameters.
 
     With readonly=True and READONLY_DB_PASSWORD set, connect as the
-    SELECT-only nba_readonly role instead of the owner.
+    configured SELECT-only role instead of the owner.
     """
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        parsed = urlparse(database_url)
-        config: dict[str, Any] = {
-            "dbname": parsed.path.lstrip("/"),
-            "user": parsed.username or "",
-            "password": parsed.password or "",
-            "host": parsed.hostname or "localhost",
-            "port": parsed.port or 5432,
-        }
+        # Let libpq parse the URI. Besides correctly decoding credentials, this
+        # retains options such as sslmode, connect_timeout and application_name.
+        config: dict[str, Any] = conninfo_to_dict(database_url)
+        if "port" in config:
+            config["port"] = int(config["port"])
     else:
         config = {
             "dbname": os.getenv("DB_NAME", "nba_db"),
@@ -37,7 +34,7 @@ def get_db_config(readonly: bool = False) -> dict[str, Any]:
     if readonly:
         ro_password = os.getenv("READONLY_DB_PASSWORD")
         if ro_password:
-            config["user"] = "nba_readonly"
+            config["user"] = os.getenv("READONLY_DB_USER", "nba_readonly")
             config["password"] = ro_password
 
     return config
@@ -45,11 +42,5 @@ def get_db_config(readonly: bool = False) -> dict[str, Any]:
 
 def get_conninfo(readonly: bool = False) -> str:
     """Return a PostgreSQL connection string."""
-    config = get_db_config(readonly=readonly)
-    return (
-        f"dbname={config['dbname']} "
-        f"user={config['user']} "
-        f"password={config['password']} "
-        f"host={config['host']} "
-        f"port={config['port']}"
-    )
+    # make_conninfo applies libpq escaping for spaces, quotes and backslashes.
+    return make_conninfo("", **get_db_config(readonly=readonly))

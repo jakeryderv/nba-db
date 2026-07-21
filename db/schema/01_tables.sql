@@ -2,7 +2,7 @@
 -- Simplified tables for teams, players, games, and game stats
 
 -- Seasons table (tracks loaded seasons)
-CREATE TABLE seasons (
+CREATE TABLE IF NOT EXISTS seasons (
     id VARCHAR(10) PRIMARY KEY,  -- e.g., '2024-25'
     start_year INTEGER NOT NULL,
     end_year INTEGER NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE seasons (
 );
 
 -- Teams table
-CREATE TABLE teams (
+CREATE TABLE IF NOT EXISTS teams (
     id BIGINT PRIMARY KEY,
     full_name VARCHAR(100) NOT NULL,
     abbreviation VARCHAR(3) NOT NULL UNIQUE,
@@ -23,7 +23,7 @@ CREATE TABLE teams (
 );
 
 -- Players table
-CREATE TABLE players (
+CREATE TABLE IF NOT EXISTS players (
     id BIGINT PRIMARY KEY,
     full_name VARCHAR(100) NOT NULL,
     first_name VARCHAR(50),
@@ -32,7 +32,7 @@ CREATE TABLE players (
 );
 
 -- Games table
-CREATE TABLE games (
+CREATE TABLE IF NOT EXISTS games (
     id VARCHAR(20) PRIMARY KEY,
     game_date DATE,
     season VARCHAR(10) NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE games (
 );
 
 -- Team game statistics
-CREATE TABLE team_game_stats (
+CREATE TABLE IF NOT EXISTS team_game_stats (
     id SERIAL PRIMARY KEY,
     game_id VARCHAR(20) NOT NULL,
     team_id BIGINT NOT NULL,
@@ -82,7 +82,7 @@ CREATE TABLE team_game_stats (
 );
 
 -- Player game statistics
-CREATE TABLE player_game_stats (
+CREATE TABLE IF NOT EXISTS player_game_stats (
     id SERIAL PRIMARY KEY,
     game_id VARCHAR(20) NOT NULL,
     player_id BIGINT NOT NULL,
