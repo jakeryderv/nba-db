@@ -123,6 +123,9 @@ def test_team_season_stats(client):
         "away_losses": 0,
         "ppg": 110.0,
         "opponent_ppg": 100.0,
+        "point_diff": 10.0,
+        "last_10_wins": 10,
+        "last_10_losses": 0,
         "rpg": 45.0,
         "apg": 25.0,
         "spg": 0.0,
@@ -130,6 +133,7 @@ def test_team_season_stats(client):
         "fg_pct": 0.444,
         "fg3_pct": 0.343,
         "ft_pct": 0.818,
+        "efg_pct": 0.511,
     }
 
 
@@ -184,6 +188,10 @@ def test_player_season_averages(client):
 
 def test_player_stats_not_found(client):
     assert client.get("/api/players/1/stats").status_code == 404
+
+
+def test_dnp_rows_do_not_create_player_averages(client):
+    assert client.get(f"/api/players/{JORDAN}/stats").status_code == 404
 
 
 def test_player_game_log(client):
@@ -259,7 +267,51 @@ def test_leaders_respects_min_games_threshold(client):
     r = client.get("/api/leaders/points", params={"season": SEED_SEASON})
     assert r.status_code == 200
     leaders = r.json()["data"]
+    assert r.json()["minimum_games"] == 7
     assert [(leader["player_id"], leader["value"]) for leader in leaders] == [(LEBRON, 30.0)]
+
+
+def test_player_comparison(client):
+    r = client.get(
+        "/api/comparisons/players",
+        params=[
+            ("player_ids", LEBRON),
+            ("player_ids", TATUM),
+            ("season", SEED_SEASON),
+        ],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["season"] == SEED_SEASON
+    assert [(row["player_id"], row["ppg"]) for row in body["data"]] == [
+        (LEBRON, 30.0),
+        (TATUM, 25.0),
+    ]
+
+
+def test_player_comparison_requires_two_distinct_players(client):
+    r = client.get(
+        "/api/comparisons/players",
+        params=[("player_ids", LEBRON), ("player_ids", LEBRON), ("season", SEED_SEASON)],
+    )
+    assert r.status_code == 422
+
+
+def test_team_comparison_includes_head_to_head(client):
+    r = client.get(
+        "/api/comparisons/teams",
+        params=[("team_ids", LAKERS), ("team_ids", CELTICS), ("season", SEED_SEASON)],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert [row["team"]["id"] for row in body["data"]] == [LAKERS, CELTICS]
+    assert body["head_to_head"] == {
+        "games_played": 10,
+        "first_team_wins": 10,
+        "second_team_wins": 0,
+        "first_team_ppg": 110.0,
+        "second_team_ppg": 100.0,
+    }
 
 
 def test_leaders_rejects_unknown_stat(client):

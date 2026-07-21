@@ -70,7 +70,7 @@ def _seed(conn: psycopg.Connection) -> None:
                     " VALUES (%s, %s, %s, %s, %s, 45, 25, 40, 90, 12, 35, 18, 22)",
                     (game_id, team_id, SEED_SEASON, is_home, points),
                 )
-            # LeBron plays all 10 games: qualifies for leaders (HAVING COUNT(*) >= 10).
+            # LeBron plays all 10 games and qualifies for the 70% leader threshold.
             cur.execute(
                 "INSERT INTO player_game_stats (game_id, player_id, team_id, season, minutes,"
                 " points, rebounds, assists, fgm, fga, fg3m, fg3a, ftm, fta)"
@@ -84,6 +84,13 @@ def _seed(conn: psycopg.Connection) -> None:
                     " points, rebounds, assists, fgm, fga, fg3m, fg3a, ftm, fta)"
                     " VALUES (%s, %s, %s, %s, 34.0, 25, 7, 4, 9, 19, 3, 8, 4, 4)",
                     (game_id, TATUM, CELTICS, SEED_SEASON),
+                )
+            # A DNP row must not count as an appearance or affect averages/leaders.
+            if i == 10:
+                cur.execute(
+                    "INSERT INTO player_game_stats (game_id, player_id, team_id, season, minutes)"
+                    " VALUES (%s, %s, %s, %s, NULL)",
+                    (game_id, JORDAN, LAKERS, SEED_SEASON),
                 )
     conn.commit()
 

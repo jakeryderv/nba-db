@@ -153,6 +153,9 @@ class TeamSeasonSummary(BaseModel):
     away_losses: int
     ppg: float
     opponent_ppg: float
+    point_diff: float
+    last_10_wins: int
+    last_10_losses: int
     rpg: float
     apg: float
     spg: float
@@ -160,6 +163,7 @@ class TeamSeasonSummary(BaseModel):
     fg_pct: float | None = None
     fg3_pct: float | None = None
     ft_pct: float | None = None
+    efg_pct: float | None = None
 
 
 class TeamPlayerSummary(BaseModel):
@@ -228,6 +232,30 @@ class GameBoxScore(BaseModel):
     away_team_stats: TeamGameStats | None
 
 
+class PlayerComparison(BaseModel):
+    season: str
+    data: list[PlayerSeasonAvg]
+
+
+class TeamComparisonEntry(BaseModel):
+    team: Team
+    stats: TeamSeasonSummary
+
+
+class HeadToHeadSummary(BaseModel):
+    games_played: int
+    first_team_wins: int
+    second_team_wins: int
+    first_team_ppg: float
+    second_team_ppg: float
+
+
+class TeamComparison(BaseModel):
+    season: str
+    data: list[TeamComparisonEntry]
+    head_to_head: HeadToHeadSummary
+
+
 # === Leader Models ===
 
 
@@ -243,4 +271,5 @@ class StatLeader(BaseModel):
 class LeaderList(BaseModel):
     stat: str
     season: str
+    minimum_games: int
     data: list[StatLeader]
