@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from app.db import close_pool, get_cursor
@@ -48,6 +48,18 @@ app = FastAPI(
 )
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+@app.middleware("http")
+async def add_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.method != "GET" or response.status_code >= 400:
+        return response
+    if request.url.path == "/health":
+        response.headers["Cache-Control"] = "no-store"
+    elif request.url.path == "/" or request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
+    return response
 
 
 # === Web Interface ===
