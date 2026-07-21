@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from db.config import get_db_config
 
 SCHEMA_DIR = PROJECT_ROOT / "db" / "schema"
+MIGRATION_FILENAME = re.compile(r"^\d+_[a-z0-9_]+\.sql$")
+
+
+class MigrationChecksumError(RuntimeError):
+    """Raised when an already-applied migration has been edited."""
 
 
 def split_sql(sql: str) -> list[str]:
@@ -52,15 +58,19 @@ def split_sql(sql: str) -> list[str]:
 
 
 def apply_schema(conn: psycopg.Connection) -> None:
-    """Apply new or changed schema files and record their checksums.
+    """Apply new numbered schema files and record their checksums.
 
     Schema files are written to be idempotent so an existing database can be
-    brought under migration tracking on its first run. Adding a numbered SQL
-    file, or deliberately changing one, causes it to be applied transactionally.
+    brought under migration tracking on its first run. Applied files are
+    immutable: every schema change after that must use a new numbered SQL file.
     """
     sql_files = sorted(SCHEMA_DIR.glob("*.sql"))
     if not sql_files:
         raise FileNotFoundError(f"No SQL files found in {SCHEMA_DIR}")
+    invalid_names = [path.name for path in sql_files if not MIGRATION_FILENAME.fullmatch(path.name)]
+    if invalid_names:
+        names = ", ".join(invalid_names)
+        raise ValueError(f"Schema migration filenames must be numbered: {names}")
 
     try:
         with conn.cursor() as cur:
@@ -81,7 +91,12 @@ def apply_schema(conn: psycopg.Connection) -> None:
                     (sql_file.name,),
                 )
                 row = cur.fetchone()
-                if row and row[0] == checksum:
+                if row:
+                    if row[0] != checksum:
+                        raise MigrationChecksumError(
+                            f"Applied schema migration {sql_file.name} has changed; "
+                            "restore it and add a new numbered migration instead"
+                        )
                     print(f"Skipping {sql_file.name} (already applied).")
                     continue
 
@@ -92,9 +107,6 @@ def apply_schema(conn: psycopg.Connection) -> None:
                     """
                     INSERT INTO schema_migrations (filename, checksum, applied_at)
                     VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (filename) DO UPDATE SET
-                        checksum = EXCLUDED.checksum,
-                        applied_at = EXCLUDED.applied_at
                     """,
                     (sql_file.name, checksum),
                 )
