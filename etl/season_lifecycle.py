@@ -33,7 +33,7 @@ from scripts.init_db import apply_schema
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_ROOT = PROJECT_ROOT / "data" / "clean"
 MANIFEST_FILENAME = "manifest.json"
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 SEASON_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 GAME_ID_PATTERN = re.compile(r"^002\d{7}$")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -109,6 +109,25 @@ PLAYER_STATS_COLUMNS = [
     "ft_pct",
     "plus_minus",
 ]
+SHOT_COLUMNS = [
+    "game_id",
+    "event_id",
+    "player_id",
+    "team_id",
+    "season",
+    "period",
+    "minutes_remaining",
+    "seconds_remaining",
+    "action_type",
+    "shot_type",
+    "zone_basic",
+    "zone_area",
+    "zone_range",
+    "shot_distance",
+    "loc_x",
+    "loc_y",
+    "shot_made",
+]
 COUNTING_STATS_COLUMNS = [
     "points",
     "rebounds",
@@ -153,6 +172,7 @@ class SeasonDataset:
     games: pd.DataFrame
     team_stats: pd.DataFrame
     player_stats: pd.DataFrame
+    shots: pd.DataFrame
     manifest: dict[str, Any] | None = None
 
     @property
@@ -163,6 +183,7 @@ class SeasonDataset:
             "games": len(self.games),
             "team_game_stats": len(self.team_stats),
             "player_game_stats": len(self.player_stats),
+            "shot_attempts": len(self.shots),
         }
 
 
@@ -182,6 +203,7 @@ def dataset_paths(clean_root: Path, season: str) -> dict[str, Path]:
         "games": clean_root / season / "games.csv",
         "team_game_stats": clean_root / season / "team_game_stats.csv",
         "player_game_stats": clean_root / season / "player_game_stats.csv",
+        "shot_attempts": clean_root / season / "shot_attempts.csv",
     }
 
 
@@ -264,6 +286,7 @@ def _normalize_numerics(
     games: pd.DataFrame,
     team_stats: pd.DataFrame,
     player_stats: pd.DataFrame,
+    shots: pd.DataFrame,
 ) -> None:
     _normalize_numeric_columns(teams, ["id"], "teams.csv", integral=True, minimum=1)
     _normalize_numeric_columns(
@@ -346,6 +369,42 @@ def _normalize_numerics(
     _normalize_numeric_columns(
         player_stats, ["plus_minus"], "player_game_stats.csv", allow_null=True
     )
+    _normalize_numeric_columns(
+        shots,
+        ["event_id", "player_id", "team_id", "period"],
+        "shot_attempts.csv",
+        integral=True,
+        minimum=1,
+    )
+    _normalize_numeric_columns(
+        shots,
+        ["minutes_remaining"],
+        "shot_attempts.csv",
+        integral=True,
+        minimum=0,
+        maximum=12,
+    )
+    _normalize_numeric_columns(
+        shots,
+        ["seconds_remaining"],
+        "shot_attempts.csv",
+        integral=True,
+        minimum=0,
+        maximum=59,
+    )
+    _normalize_numeric_columns(
+        shots,
+        ["shot_distance"],
+        "shot_attempts.csv",
+        integral=True,
+        minimum=0,
+        maximum=100,
+    )
+    _normalize_numeric_columns(shots, ["loc_x", "loc_y"], "shot_attempts.csv", integral=True)
+    if (shots["period"] > 20).any():
+        raise DatasetValidationError("shot_attempts.csv.period must be at most 20")
+    if (shots["loc_x"].abs() > 400).any() or not shots["loc_y"].between(-100, 1000).all():
+        raise DatasetValidationError("shot_attempts.csv contains coordinates outside the court")
     for filename, frame in (
         ("team_game_stats.csv", team_stats),
         ("player_game_stats.csv", player_stats),
@@ -353,6 +412,64 @@ def _normalize_numerics(
         for makes, attempts in (("fgm", "fga"), ("fg3m", "fg3a"), ("ftm", "fta")):
             if (frame[makes] > frame[attempts]).any():
                 raise DatasetValidationError(f"{filename}.{makes} cannot exceed {attempts}")
+
+
+def _shot_total_comparison(dataset: SeasonDataset) -> pd.DataFrame:
+    expected = dataset.player_stats[
+        ["game_id", "player_id", "team_id", "fga", "fgm", "fg3a", "fg3m"]
+    ].copy()
+    shot_totals = dataset.shots.assign(
+        fg3a=dataset.shots["shot_type"].eq("3PT Field Goal").astype(int),
+        fg3m=(dataset.shots["shot_type"].eq("3PT Field Goal") & dataset.shots["shot_made"]).astype(
+            int
+        ),
+    )
+    actual = shot_totals.groupby(["game_id", "player_id"], as_index=False).agg(
+        team_id=("team_id", "first"),
+        fga=("event_id", "size"),
+        fgm=("shot_made", "sum"),
+        fg3a=("fg3a", "sum"),
+        fg3m=("fg3m", "sum"),
+    )
+    comparison = expected.merge(
+        actual,
+        on=["game_id", "player_id"],
+        how="outer",
+        suffixes=("_stats", "_shots"),
+    )
+    no_attempts = comparison["team_id_stats"].notna() & comparison["team_id_shots"].isna()
+    comparison.loc[no_attempts, "team_id_shots"] = comparison.loc[no_attempts, "team_id_stats"]
+    comparison.loc[no_attempts, ["fga_shots", "fgm_shots", "fg3a_shots", "fg3m_shots"]] = 0
+    return comparison.fillna(-1)
+
+
+def shot_verification_summary(dataset: SeasonDataset) -> dict[str, Any]:
+    """Describe accepted one-attempt source corrections for the manifest."""
+    comparison = _shot_total_comparison(dataset)
+    differences = []
+    for row in comparison.itertuples(index=False):
+        for stat_name in ("fga", "fg3a"):
+            box_score = int(getattr(row, f"{stat_name}_stats"))
+            shots = int(getattr(row, f"{stat_name}_shots"))
+            if box_score != shots:
+                differences.append(
+                    {
+                        "game_id": str(row.game_id),
+                        "player_id": int(str(row.player_id)),
+                        "team_id": int(str(row.team_id_stats)),
+                        "stat": stat_name,
+                        "box_score": box_score,
+                        "shots": shots,
+                        "difference": shots - box_score,
+                        "tolerance": 1,
+                    }
+                )
+    return {
+        "status": "passed",
+        "policy": "makes and team identity exact; attempt corrections differ by at most one",
+        "difference_count": len(differences),
+        "differences": differences,
+    }
 
 
 def _validate_relations(dataset: SeasonDataset) -> list[str]:
@@ -371,11 +488,14 @@ def _validate_relations(dataset: SeasonDataset) -> list[str]:
         errors.append("team_game_stats.csv contains duplicate (game_id, team_id) keys")
     if _duplicates(dataset.player_stats, ["game_id", "player_id"]):
         errors.append("player_game_stats.csv contains duplicate (game_id, player_id) keys")
+    if _duplicates(dataset.shots, ["game_id", "event_id"]):
+        errors.append("shot_attempts.csv contains duplicate (game_id, event_id) keys")
 
     for name, frame, column in (
         ("games.csv", dataset.games, "season"),
         ("team_game_stats.csv", dataset.team_stats, "season"),
         ("player_game_stats.csv", dataset.player_stats, "season"),
+        ("shot_attempts.csv", dataset.shots, "season"),
     ):
         seasons = set(frame[column].dropna().astype(str))
         if seasons != {dataset.season}:
@@ -385,6 +505,7 @@ def _validate_relations(dataset: SeasonDataset) -> list[str]:
         ("games.id", dataset.games["id"]),
         ("team_game_stats.game_id", dataset.team_stats["game_id"]),
         ("player_game_stats.game_id", dataset.player_stats["game_id"]),
+        ("shot_attempts.game_id", dataset.shots["game_id"]),
     ):
         invalid = [value for value in values.astype(str) if not GAME_ID_PATTERN.fullmatch(value)]
         if invalid:
@@ -407,6 +528,12 @@ def _validate_relations(dataset: SeasonDataset) -> list[str]:
         errors.append("player_game_stats.csv references teams absent from teams.csv")
     if not set(dataset.player_stats["player_id"]) <= players:
         errors.append("player_game_stats.csv references players absent from players.csv")
+    if not set(dataset.shots["game_id"]) <= games:
+        errors.append("shot_attempts.csv references games absent from games.csv")
+    if not set(dataset.shots["team_id"]) <= teams:
+        errors.append("shot_attempts.csv references teams absent from teams.csv")
+    if not set(dataset.shots["player_id"]) <= players:
+        errors.append("shot_attempts.csv references players absent from players.csv")
 
     game_rows = dataset.games.set_index("id")
     grouped_teams = dataset.team_stats.groupby("game_id")
@@ -440,6 +567,12 @@ def _validate_relations(dataset: SeasonDataset) -> list[str]:
     )
     if invalid_player_team:
         errors.append("player_game_stats.csv contains a team that did not play in its game")
+    invalid_shot_team = any(
+        row.team_id not in participants.get(row.game_id, set())
+        for row in dataset.shots[["game_id", "team_id"]].itertuples(index=False)
+    )
+    if invalid_shot_team:
+        errors.append("shot_attempts.csv contains a team that did not play in its game")
     grouped_players = dataset.player_stats.groupby("game_id")
     if set(grouped_players.groups) != games:
         errors.append("every game must have player statistics")
@@ -449,6 +582,23 @@ def _validate_relations(dataset: SeasonDataset) -> list[str]:
             and set(grouped_players.get_group(game_id)["team_id"]) != expected_teams
         ):
             errors.append(f"game {game_id} must have player statistics for both teams")
+
+    shot_team_counts = dataset.shots.groupby(["game_id", "player_id"])["team_id"].nunique()
+    if (shot_team_counts > 1).any():
+        errors.append("shot_attempts.csv assigns one player to multiple teams in a game")
+    comparison = _shot_total_comparison(dataset)
+    fatal = comparison[
+        (comparison["team_id_stats"] != comparison["team_id_shots"])
+        | (comparison["fgm_stats"] != comparison["fgm_shots"])
+        | (comparison["fg3m_stats"] != comparison["fg3m_shots"])
+        | ((comparison["fga_stats"] - comparison["fga_shots"]).abs() > 1)
+        | ((comparison["fg3a_stats"] - comparison["fg3a_shots"]).abs() > 1)
+    ]
+    if not fatal.empty:
+        errors.append(
+            "shot_attempts.csv totals exceed the correction policy for "
+            f"{len(fatal)} player-game rows"
+        )
     return errors
 
 
@@ -465,12 +615,14 @@ def load_validated_dataset(clean_root: Path, season: str) -> SeasonDataset:
     games = _read_csv(paths["games"], "id")
     team_stats = _read_csv(paths["team_game_stats"], "game_id")
     player_stats = _read_csv(paths["player_game_stats"], "game_id")
+    shots = _read_csv(paths["shot_attempts"], "game_id")
     frames = {
         "teams": (teams, TEAM_COLUMNS),
         "players": (players, PLAYER_COLUMNS),
         "games": (games, GAME_COLUMNS),
         "team_game_stats": (team_stats, TEAM_STATS_COLUMNS),
         "player_game_stats": (player_stats, PLAYER_STATS_COLUMNS),
+        "shot_attempts": (shots, SHOT_COLUMNS),
     }
     errors: list[str] = []
     for name, (frame, columns) in frames.items():
@@ -492,6 +644,7 @@ def load_validated_dataset(clean_root: Path, season: str) -> SeasonDataset:
             player_stats,
             ["game_id", "player_id", "team_id", "season", "points"],
         ),
+        "shot_attempts": (shots, SHOT_COLUMNS),
     }
     null_errors = [
         f"{name}.csv contains null required values"
@@ -502,7 +655,14 @@ def load_validated_dataset(clean_root: Path, season: str) -> SeasonDataset:
         raise DatasetValidationError("; ".join(null_errors))
     _normalize_boolean_column(players, "is_active", "players.csv")
     _normalize_boolean_column(team_stats, "is_home", "team_game_stats.csv")
-    _normalize_numerics(teams, players, games, team_stats, player_stats)
+    _normalize_boolean_column(shots, "shot_made", "shot_attempts.csv")
+    _normalize_numerics(teams, players, games, team_stats, player_stats, shots)
+
+    if not shots["shot_type"].isin({"2PT Field Goal", "3PT Field Goal"}).all():
+        raise DatasetValidationError("shot_attempts.csv contains an unsupported shot_type")
+    for column in ("action_type", "shot_type", "zone_basic", "zone_area", "zone_range"):
+        if shots[column].astype(str).str.strip().eq("").any():
+            raise DatasetValidationError(f"shot_attempts.csv.{column} must not be empty")
 
     games = games[GAME_COLUMNS].copy()
     games["game_date"] = pd.to_datetime(games["game_date"], errors="coerce").dt.date
@@ -513,6 +673,7 @@ def load_validated_dataset(clean_root: Path, season: str) -> SeasonDataset:
         games=games,
         team_stats=team_stats[TEAM_STATS_COLUMNS],
         player_stats=player_stats[PLAYER_STATS_COLUMNS],
+        shots=shots[SHOT_COLUMNS],
     )
     errors = _validate_relations(dataset)
     if errors:
@@ -553,6 +714,7 @@ def generate_manifest(clean_root: Path, season: str) -> dict[str, Any]:
             "season": season,
             "season_type": "Regular Season",
             "game_log_scopes": ["teams", "players"],
+            "shot_chart_scope": "all-teams",
         },
         "counts": dataset.counts,
         "files": {
@@ -569,6 +731,7 @@ def generate_manifest(clean_root: Path, season: str) -> dict[str, Any]:
             "provider": verification_report["provider"],
             "generated_at": verification_report["generated_at"],
         },
+        "shot_verification": shot_verification_summary(dataset),
     }
     output = manifest_path(clean_root, season)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -612,6 +775,7 @@ def verify_manifest(clean_root: Path, season: str) -> SeasonDataset:
         or source.get("season") != season
         or source.get("season_type") != "Regular Season"
         or source.get("game_log_scopes") != ["teams", "players"]
+        or source.get("shot_chart_scope") != "all-teams"
     ):
         raise ManifestVerificationError("Manifest source provenance does not match the season")
 
@@ -667,6 +831,10 @@ def verify_manifest(clean_root: Path, season: str) -> SeasonDataset:
             raise ManifestVerificationError(f"Row-count mismatch for {relative}")
     if manifest.get("counts") != dataset.counts:
         raise ManifestVerificationError("Manifest aggregate counts do not match transformed files")
+    if manifest.get("shot_verification") != shot_verification_summary(dataset):
+        raise ManifestVerificationError(
+            "Manifest shot verification does not match transformed files"
+        )
     if verification.get("sha256") != _sha256(verification_file):
         raise ManifestVerificationError("Official verification changed while reading")
     return SeasonDataset(**{**dataset.__dict__, "manifest": manifest})
@@ -698,6 +866,7 @@ def _verify_database(cur: psycopg.Cursor, dataset: SeasonDataset, single_season:
         ("games", "games"),
         ("team_game_stats", "team_game_stats"),
         ("player_game_stats", "player_game_stats"),
+        ("shot_attempts", "shot_attempts"),
     ):
         cur.execute(f"SELECT COUNT(*) FROM {table} WHERE season = %s", (dataset.season,))
         counts[name] = _scalar(cur)
@@ -755,12 +924,19 @@ def _verify_database(cur: psycopg.Cursor, dataset: SeasonDataset, single_season:
                 SELECT season FROM games
                 UNION ALL SELECT season FROM team_game_stats
                 UNION ALL SELECT season FROM player_game_stats
+                UNION ALL SELECT season FROM shot_attempts
             ) loaded WHERE season <> %s
             """,
             (dataset.season,),
         )
         if _scalar(cur):
             raise SeasonLifecycleError("Single-season replacement left non-target data rows")
+        for name, table in (("teams", "teams"), ("players", "players")):
+            cur.execute(f"SELECT COUNT(*) FROM {table}")
+            if _scalar(cur) != dataset.counts[name]:
+                raise SeasonLifecycleError(
+                    f"Single-season replacement left stale shared {name} rows"
+                )
 
 
 def replace_season(
@@ -800,11 +976,25 @@ def replace_season(
                 _rows(dataset.players, PLAYER_COLUMNS),
             )
             if single_season:
+                cur.execute("DELETE FROM shot_attempts")
                 cur.execute("DELETE FROM player_game_stats")
                 cur.execute("DELETE FROM team_game_stats")
                 cur.execute("DELETE FROM games")
                 cur.execute("DELETE FROM seasons")
+                cur.execute(
+                    "DELETE FROM players WHERE NOT (id = ANY(%s))",
+                    (dataset.players["id"].astype(int).tolist(),),
+                )
+                cur.execute(
+                    "DELETE FROM teams WHERE NOT (id = ANY(%s))",
+                    (dataset.teams["id"].astype(int).tolist(),),
+                )
             else:
+                cur.execute(
+                    "DELETE FROM shot_attempts WHERE season = %s OR game_id IN "
+                    "(SELECT id FROM games WHERE season = %s)",
+                    (dataset.season, dataset.season),
+                )
                 cur.execute(
                     "DELETE FROM player_game_stats WHERE season = %s OR game_id IN "
                     "(SELECT id FROM games WHERE season = %s)",
@@ -848,6 +1038,20 @@ def replace_season(
                           %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 _rows(dataset.player_stats, PLAYER_STATS_COLUMNS),
+            )
+            cur.executemany(
+                """
+                INSERT INTO shot_attempts (
+                    game_id, event_id, player_id, team_id, season, period,
+                    minutes_remaining, seconds_remaining, action_type, shot_type,
+                    zone_basic, zone_area, zone_range, shot_distance, loc_x, loc_y,
+                    shot_made
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s
+                )
+                """,
+                _rows(dataset.shots, SHOT_COLUMNS),
             )
             cur.execute("CALL sp_update_season_metadata(%s)", (dataset.season,))
             _verify_database(cur, dataset, single_season)

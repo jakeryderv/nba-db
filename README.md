@@ -6,7 +6,7 @@ A read-only web app and REST API for exploring NBA statistics — standings, sta
 
 ## How it works
 
-- **ETL pipeline** (`etl/`) downloads season data from the NBA API, transforms it to CSVs, and loads it into PostgreSQL. Loading is an operator task — the public app has no write capability.
+- **ETL pipeline** (`etl/`) downloads season box scores and league-wide shot locations from the NBA API, transforms them to CSVs, and loads them into PostgreSQL. Loading is an operator task — the public app has no write capability.
 - **FastAPI app** (`app/`) serves a single-page dashboard and a read-only JSON API. In production it connects with a SELECT-only database role (`nba_readonly`).
 - **Schema** (`db/schema/`) is managed as numbered, checksum-tracked migrations by `scripts/init_db.py` (Railway `startCommand`), with CHECK constraints, indexes, and views.
 
@@ -37,6 +37,8 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | `GET /api/players/{id}` | Player by ID |
 | `GET /api/players/{id}/stats` | Player season averages |
 | `GET /api/players/{id}/games` | Paginated player game log |
+| `GET /api/shot-chart/players` | Players with shot attempts in a season |
+| `GET /api/shot-chart` | Player or team shot locations and complete zone aggregates |
 | `GET /api/comparisons/players` | Compare exactly two players for a season |
 | `GET /api/comparisons/teams` | Compare two teams, including head-to-head results |
 | `GET /api/games` | Games (filter by `?season=`, `?team_id=`) |
@@ -94,7 +96,7 @@ The guarded lifecycle handles exactly one NBA **Regular Season** dataset at a ti
 
 ### 1. Build and validate one season
 
-Choose the season deliberately. This force-downloads fresh source data, transforms it, validates file relationships and official Regular Season game IDs in the `002.......` format, then compares calculated team and player counting-stat totals with the NBA's `LeagueDashTeamStats` and `LeagueDashPlayerStats` totals. Games played, records, and points must match exactly. Other counting stats allow a documented one-count difference because NBA game-log and aggregate feeds can diverge after stat corrections; every difference remains visible in the report. Only a passing `data/clean/<season>/verification.json` can be bound into `manifest.json` with source scope, row counts, and SHA-256 checksums.
+Choose the season deliberately. This force-downloads fresh source data, including bounded `ShotChartDetail` responses for all 30 teams, transforms it, validates file relationships and official Regular Season game IDs in the `002.......` format, then compares calculated team and player counting-stat totals with the NBA's `LeagueDashTeamStats` and `LeagueDashPlayerStats` totals. Per-team requests are deliberate because the NBA endpoint silently caps an all-league shot response at 102,400 rows. Shot makes, player/team identity, and 3PT makes must match each player-game box score exactly. FGA and 3PA may differ by one for a documented NBA source correction; every accepted difference is recorded in `manifest.json`, while anything larger fails closed. Games played, records, and points must match exactly. Other counting stats use the same documented one-count correction policy because NBA game-log and aggregate feeds can diverge after stat corrections; every difference remains visible in the report. Only a passing `data/clean/<season>/verification.json` can be bound into the manifest with source scope, row counts, and SHA-256 checksums for all six transformed files.
 
 ```bash
 make season-build SEASON=2025-26
@@ -144,7 +146,7 @@ dagger call local-load \
 
 `local-load` has no network extraction step. It verifies the exported manifest again and uses the same exact one-season replacement logic as the Make workflow. The required operation ID prevents a mutating execution layer from being reused accidentally.
 
-This is an exact one-season replacement: all other local season rows are removed inside the replacement transaction. Verify the local API and data before considering production promotion. There is no raw load or multi-season Make target. `refresh` exists only as a compatibility alias for the same guarded build and localhost replacement; it is not a production promotion path.
+This is an exact one-season replacement: all other local season rows are removed inside the replacement transaction, including shot attempts. Verify the local API, shot totals, and visualizations before considering production promotion. There is no raw load or multi-season Make target. `refresh` exists only as a compatibility alias for the same guarded build and localhost replacement; it is not a production promotion path.
 
 ### 3. Promote with backup and typed confirmations
 
@@ -222,7 +224,7 @@ Schema migration files are immutable after they have been applied. To change the
 ## Roadmap
 
 - [ ] Automated data refresh (production loading is currently a guarded operator task)
-- [ ] Shot chart data and visualizations
+- [x] Shot chart data, zone analytics, filters, and player/team comparisons
 - [ ] Historical season backfill
 
 ## License

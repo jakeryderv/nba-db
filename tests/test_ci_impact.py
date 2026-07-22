@@ -24,6 +24,7 @@ def test_frontend_and_docs_changes_select_frontend() -> None:
 def test_lifecycle_and_docs_changes_select_lifecycle() -> None:
     assert classify_paths(["etl/transform.py", "docs/lifecycle.md"]) is Impact.LIFECYCLE
     assert classify_paths(["tests/test_season_lifecycle.py"]) is Impact.LIFECYCLE
+    assert classify_paths(["tests/test_shot_pipeline.py"]) is Impact.LIFECYCLE
 
 
 def test_mixed_components_select_full() -> None:

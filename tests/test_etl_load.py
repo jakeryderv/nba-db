@@ -168,6 +168,10 @@ def test_game_load_migrates_legacy_ids_and_merges_partially_migrated_stats(
             "UPDATE player_game_stats SET game_id = %s WHERE game_id = %s",
             (legacy_id, GAME_ID),
         )
+        cur.execute(
+            "UPDATE shot_attempts SET game_id = %s WHERE game_id = %s",
+            (legacy_id, GAME_ID),
+        )
         cur.execute("DELETE FROM games WHERE id = %s", (GAME_ID,))
 
         # Simulate a prior migration that created the canonical parent and only
@@ -234,6 +238,10 @@ def test_game_load_migrates_legacy_ids_and_merges_partially_migrated_stats(
             "SELECT COUNT(*) FROM player_game_stats WHERE game_id = %s",
             (legacy_id,),
         )
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT COUNT(*) FROM shot_attempts WHERE game_id = %s", (GAME_ID,))
+        assert cur.fetchone()[0] == 39
+        cur.execute("SELECT COUNT(*) FROM shot_attempts WHERE game_id = %s", (legacy_id,))
         assert cur.fetchone()[0] == 0
 
 

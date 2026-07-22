@@ -146,6 +146,36 @@ def write_valid_dataset(root: Path) -> None:
             },
         ],
     )
+    shots = []
+    for player_id, team_id, offset in (
+        (PLAYER_ONE, LAKERS, 0),
+        (PLAYER_TWO, CELTICS, 100),
+    ):
+        for shot in range(1, 81):
+            is_three = shot <= 30
+            made = shot <= 10 or 31 <= shot <= 60
+            shots.append(
+                {
+                    "game_id": GAME_ID,
+                    "event_id": offset + shot,
+                    "player_id": player_id,
+                    "team_id": team_id,
+                    "season": SEASON,
+                    "period": 1 + (shot - 1) // 20,
+                    "minutes_remaining": 11 - ((shot - 1) % 12),
+                    "seconds_remaining": (shot * 7) % 60,
+                    "action_type": "Jump Shot" if is_three else "Layup Shot",
+                    "shot_type": "3PT Field Goal" if is_three else "2PT Field Goal",
+                    "zone_basic": "Above the Break 3" if is_three else "Restricted Area",
+                    "zone_area": "Center(C)",
+                    "zone_range": "24+ ft." if is_three else "Less Than 8 ft.",
+                    "shot_distance": 25 if is_three else 2,
+                    "loc_x": ((shot % 41) - 20) * 10,
+                    "loc_y": 250 if is_three else 10 + shot,
+                    "shot_made": made,
+                }
+            )
+    _write(root / SEASON / "shot_attempts.csv", shots)
 
 
 def matching_official_frames(
@@ -208,7 +238,7 @@ def lifecycle_conn(client):
 def test_manifest_records_source_hashes_counts_and_verifies(valid_root: Path) -> None:
     manifest = lifecycle.generate_manifest(valid_root, SEASON)
 
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert manifest["season"] == SEASON
     assert manifest["season_type"] == "Regular Season"
     assert manifest["generated_at"]
@@ -219,9 +249,11 @@ def test_manifest_records_source_hashes_counts_and_verifies(valid_root: Path) ->
         "games": 1,
         "team_game_stats": 2,
         "player_game_stats": 2,
+        "shot_attempts": 160,
     }
-    assert len(manifest["files"]) == 5
+    assert len(manifest["files"]) == 6
     assert manifest["official_verification"]["status"] == "passed"
+    assert manifest["shot_verification"]["difference_count"] == 0
     assert lifecycle.verify_manifest(valid_root, SEASON).counts == manifest["counts"]
 
 
@@ -552,6 +584,7 @@ def test_dataset_relationship_validation(
     [
         ("team_game_stats.csv", "game_id", "duplicate.*game_id, team_id"),
         ("player_game_stats.csv", "game_id", "duplicate.*game_id, player_id"),
+        ("shot_attempts.csv", "game_id", "duplicate.*game_id, event_id"),
     ],
 )
 def test_dataset_rejects_duplicate_composite_keys(
@@ -562,6 +595,55 @@ def test_dataset_rejects_duplicate_composite_keys(
     pd.concat([frame, frame.iloc[[0]]], ignore_index=True).to_csv(path, index=False)
 
     with pytest.raises(lifecycle.DatasetValidationError, match=message):
+        lifecycle.load_validated_dataset(valid_root, SEASON)
+
+
+def test_dataset_rejects_shot_totals_that_disagree_with_box_scores(valid_root: Path) -> None:
+    path = valid_root / SEASON / "shot_attempts.csv"
+    frame = pd.read_csv(path, dtype={"game_id": "string"})
+    frame.iloc[1:].to_csv(path, index=False)
+
+    with pytest.raises(lifecycle.DatasetValidationError, match="exceed the correction policy"):
+        lifecycle.load_validated_dataset(valid_root, SEASON)
+
+
+def test_dataset_records_one_attempt_source_correction(valid_root: Path) -> None:
+    path = valid_root / SEASON / "shot_attempts.csv"
+    frame = pd.read_csv(path, dtype={"game_id": "string"})
+    removable = frame[
+        (frame["player_id"] == PLAYER_ONE)
+        & (~frame["shot_made"])
+        & (frame["shot_type"] == "2PT Field Goal")
+    ].index[0]
+    frame.drop(index=removable).to_csv(path, index=False)
+
+    dataset = lifecycle.load_validated_dataset(valid_root, SEASON)
+    summary = lifecycle.shot_verification_summary(dataset)
+
+    assert summary["difference_count"] == 1
+    assert summary["differences"] == [
+        {
+            "game_id": GAME_ID,
+            "player_id": PLAYER_ONE,
+            "team_id": LAKERS,
+            "stat": "fga",
+            "box_score": 80,
+            "shots": 79,
+            "difference": -1,
+            "tolerance": 1,
+        }
+    ]
+
+
+def test_dataset_rejects_shot_coordinates_outside_the_supported_court(
+    valid_root: Path,
+) -> None:
+    path = valid_root / SEASON / "shot_attempts.csv"
+    frame = pd.read_csv(path, dtype={"game_id": "string"})
+    frame.loc[0, "loc_x"] = 401
+    frame.to_csv(path, index=False)
+
+    with pytest.raises(lifecycle.DatasetValidationError, match="coordinates outside the court"):
         lifecycle.load_validated_dataset(valid_root, SEASON)
 
 
@@ -701,6 +783,10 @@ def test_single_season_replace_prunes_other_seasons_and_verifies_counts(
         cur.execute("SELECT COUNT(*) FROM team_game_stats")
         assert cur.fetchone()[0] == 2
         cur.execute("SELECT COUNT(*) FROM player_game_stats")
+        assert cur.fetchone()[0] == 2
+        cur.execute("SELECT COUNT(*) FROM players")
+        assert cur.fetchone()[0] == 2
+        cur.execute("SELECT COUNT(*) FROM teams")
         assert cur.fetchone()[0] == 2
 
 

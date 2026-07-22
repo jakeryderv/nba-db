@@ -1,6 +1,6 @@
-let season = null, teams = [], comparisonPlayers = [], ready = false, activeSection = 'standings';
+let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready = false, activeSection = 'standings';
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
-        const sections = new Set(['standings', 'leaders', 'games', 'players', 'compare']);
+        const sections = new Set(['standings', 'leaders', 'games', 'shots', 'players', 'compare']);
 
         const HTML_ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
 
@@ -48,6 +48,11 @@ let season = null, teams = [], comparisonPlayers = [], ready = false, activeSect
             document.getElementById('games-team').onchange = loadGames;
             document.getElementById('games-sort').onchange = loadGames;
             document.getElementById('leaders-stat').onchange = loadLeaders;
+            document.getElementById('shot-subject-type').onchange = populateShotSelectors;
+            document.getElementById('shot-chart-form').onsubmit = event => {
+                event.preventDefault();
+                navigateShotChart();
+            };
             document.getElementById('player-compare-form').onsubmit = event => {
                 event.preventDefault();
                 navigateComparison('players');
@@ -101,7 +106,10 @@ let season = null, teams = [], comparisonPlayers = [], ready = false, activeSect
                 }));
 
                 comparisonPlayers = (await api('/api/players?active=true&limit=500')).data;
+                shotPlayers = await api(`/api/shot-chart/players?${new URLSearchParams({season})}`);
                 populateComparisonSelects();
+                populateShotSelectors();
+                populateShotOpponents();
 
                 ready = true;
                 if (!window.location.hash) history.replaceState(null, '', '#standings');
@@ -136,6 +144,14 @@ let season = null, teams = [], comparisonPlayers = [], ready = false, activeSect
                 loadComparison(parts[0], parts[1], parts[2]);
                 return;
             }
+            if (kind === 'shots' && parts.length >= 2 && ['player', 'team'].includes(parts[0])) {
+                activeSection = 'shots';
+                closeModals();
+                switchTo('shots', false);
+                setShotSelection(parts[0], parts[1], parts[2] || '');
+                loadShotChart(parts[0], parts[1], parts[2] || '');
+                return;
+            }
             if (sections.has(kind)) {
                 activeSection = kind;
                 closeModals();
@@ -158,7 +174,7 @@ let season = null, teams = [], comparisonPlayers = [], ready = false, activeSect
 
         function loadSection(s) {
             s = s || document.querySelector('.nav-link.active').dataset.section;
-            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, players:loadPlayers, compare:loadCompare})[s]();
+            ({standings:loadStandings, leaders:loadLeaders, games:loadGames, shots:loadShots, players:loadPlayers, compare:loadCompare})[s]();
         }
 
         function populateComparisonSelects() {
@@ -191,6 +207,153 @@ let season = null, teams = [], comparisonPlayers = [], ready = false, activeSect
 
         function loadCompare() {
             showCompareType('players');
+        }
+
+        function populateShotSelectors() {
+            const type = document.getElementById('shot-subject-type').value;
+            const rows = type === 'team' ? teams : shotPlayers;
+            const label = type === 'team' ? 'team' : 'player';
+            const subject = document.getElementById('shot-subject');
+            const comparison = document.getElementById('shot-compare-subject');
+            const priorSubject = subject.value;
+            const priorComparison = comparison.value;
+            const options = rows.map(row => {
+                const option = document.createElement('option');
+                option.value = row.id;
+                option.textContent = row.full_name;
+                return option;
+            });
+            const prompt = document.createElement('option');
+            prompt.value = '';
+            prompt.textContent = `Select a ${label}`;
+            subject.replaceChildren(prompt, ...options);
+            if (rows.some(row => String(row.id) === priorSubject)) subject.value = priorSubject;
+
+            const comparePrompt = document.createElement('option');
+            comparePrompt.value = '';
+            comparePrompt.textContent = 'No comparison';
+            comparison.replaceChildren(comparePrompt, ...rows.map(row => {
+                const option = document.createElement('option');
+                option.value = row.id;
+                option.textContent = row.full_name;
+                return option;
+            }));
+            if (rows.some(row => String(row.id) === priorComparison)) comparison.value = priorComparison;
+        }
+
+        function populateShotOpponents() {
+            const select = document.getElementById('shot-opponent');
+            const prompt = document.createElement('option');
+            prompt.value = '';
+            prompt.textContent = 'All opponents';
+            select.replaceChildren(prompt, ...teams.map(team => {
+                const option = document.createElement('option');
+                option.value = team.id;
+                option.textContent = team.full_name;
+                return option;
+            }));
+        }
+
+        function loadShots() {
+            const id = document.getElementById('shot-subject').value;
+            if (id) loadShotChart(document.getElementById('shot-subject-type').value, id, document.getElementById('shot-compare-subject').value);
+        }
+
+        function navigateShotChart() {
+            const type = document.getElementById('shot-subject-type').value;
+            const id = document.getElementById('shot-subject').value;
+            const comparison = document.getElementById('shot-compare-subject').value;
+            const result = document.getElementById('shot-chart-result');
+            if (!id || id === comparison) {
+                showStatus(result, 'error', comparison ? 'Choose two distinct subjects.' : 'Choose a subject.');
+                return;
+            }
+            const routeValue = `#shots/${encodeURIComponent(type)}/${encodeURIComponent(id)}${comparison ? `/${encodeURIComponent(comparison)}` : ''}`;
+            if (window.location.hash === routeValue) loadShotChart(type, id, comparison);
+            else window.location.hash = routeValue;
+        }
+
+        function setShotSelection(type, id, comparison) {
+            document.getElementById('shot-subject-type').value = type;
+            populateShotSelectors();
+            document.getElementById('shot-subject').value = id;
+            document.getElementById('shot-compare-subject').value = comparison;
+        }
+
+        function shotParams(type, id) {
+            const params = new URLSearchParams({season, max_points: '10000'});
+            params.set(type === 'player' ? 'player_id' : 'team_id', id);
+            const filters = {
+                opponent_id: document.getElementById('shot-opponent').value,
+                period: document.getElementById('shot-period').value,
+                made: document.getElementById('shot-result').value,
+                shot_type: document.getElementById('shot-type').value,
+                game_id: document.getElementById('shot-game').value.trim()
+            };
+            Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+            return params;
+        }
+
+        function subjectName(type, id) {
+            const rows = type === 'team' ? teams : shotPlayers;
+            return rows.find(row => String(row.id) === String(id))?.full_name || `${type} ${id}`;
+        }
+
+        async function loadShotChart(type, id, comparison = '') {
+            const result = document.getElementById('shot-chart-result');
+            showLoading(result, 'shot chart');
+            try {
+                const ids = comparison ? [id, comparison] : [id];
+                const charts = await Promise.all(ids.map(value => api(`/api/shot-chart?${shotParams(type, value)}`)));
+                const names = ids.map(value => subjectName(type, value));
+                result.innerHTML = `
+                    <div class="shot-summary-grid">${charts.map((chart, index) => `
+                        <div class="shot-summary shot-series-${index + 1}">
+                            <h3>${h(names[index])}</h3>
+                            <strong>${h(chart.makes)} / ${h(chart.attempts)}</strong>
+                            <span>${h(pct(chart.fg_pct))} FG</span>
+                        </div>`).join('')}</div>
+                    ${charts.some(chart => chart.truncated) ? '<p class="shot-warning">The plotted points are capped for browser performance; zone totals remain complete.</p>' : ''}
+                    <div class="shot-layout">
+                        ${shotCourt(charts, names)}
+                        ${shotZoneTable(charts, names)}
+                    </div>`;
+            } catch (error) {
+                showError(result, 'shot chart', error);
+            }
+        }
+
+        function shotCourt(charts, names) {
+            const markers = charts.flatMap((chart, series) => chart.data.map(shot => {
+                const x = Math.max(10, Math.min(510, Number(shot.loc_x) + 260));
+                const y = Math.max(10, Math.min(500, 480 - Number(shot.loc_y)));
+                const label = `${names[series]}: ${shot.shot_made ? 'Made' : 'Missed'} ${shot.action_type}, ${shot.shot_distance} ft, Q${shot.period} ${shot.minutes_remaining}:${String(shot.seconds_remaining).padStart(2, '0')}`;
+                if (series === 0) return `<circle class="shot-marker shot-series-1 ${shot.shot_made ? 'made' : 'missed'}" cx="${h(x)}" cy="${h(y)}" r="4"><title>${h(label)}</title></circle>`;
+                return `<rect class="shot-marker shot-series-2 ${shot.shot_made ? 'made' : 'missed'}" x="${h(x - 4)}" y="${h(y - 4)}" width="8" height="8"><title>${h(label)}</title></rect>`;
+            })).join('');
+            return `<div class="shot-court-card">
+                <div class="shot-legend">${names.map((name, index) => `<span class="shot-series-${index + 1}"><i></i>${h(name)}</span>`).join('')}<span><b class="made-key"></b> made</span><span><b class="missed-key"></b> missed</span></div>
+                <svg class="shot-court" viewBox="0 0 520 520" role="img" aria-label="Half-court shot chart">
+                    <g class="court-lines"><rect x="10" y="10" width="500" height="490"/><line x1="10" y1="500" x2="510" y2="500"/><line x1="230" y1="492" x2="290" y2="492"/><circle cx="260" cy="480" r="8"/><rect x="180" y="310" width="160" height="190"/><circle cx="260" cy="310" r="60"/><path d="M30 500 L30 360 A230 230 0 0 1 490 360 L490 500"/><path d="M200 480 A60 60 0 0 0 320 480"/></g>
+                    ${markers}
+                </svg>
+            </div>`;
+        }
+
+        function shotZoneTable(charts, names) {
+            const zoneKeys = [...new Set(charts.flatMap(chart => chart.zones.map(zone => `${zone.zone_basic}|${zone.zone_area}|${zone.zone_range}`)))];
+            if (!zoneKeys.length) return '<div class="empty-message">No attempts match these filters.</div>';
+            const maps = charts.map(chart => new Map(chart.zones.map(zone => [`${zone.zone_basic}|${zone.zone_area}|${zone.zone_range}`, zone])));
+            return `<div class="table-container shot-zones"><div class="table-scroll"><table>
+                <thead><tr><th>Zone</th>${names.map(name => `<th>${h(name)}</th>`).join('')}</tr></thead>
+                <tbody>${zoneKeys.map(key => {
+                    const [basic, area, range] = key.split('|');
+                    return `<tr><td><strong>${h(basic)}</strong><br><span class="detail-meta">${h(area)} · ${h(range)}</span></td>${maps.map(map => {
+                        const zone = map.get(key);
+                        return `<td class="num">${zone ? `${h(zone.makes)}/${h(zone.attempts)} · ${h(pct(zone.fg_pct))}` : '-'}</td>`;
+                    }).join('')}</tr>`;
+                }).join('')}</tbody>
+            </table></div></div>`;
         }
 
         function navigateComparison(type) {

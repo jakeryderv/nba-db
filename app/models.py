@@ -224,6 +224,51 @@ class TeamPlayerSummaryList(BaseModel):
     data: list[TeamPlayerSummary]
 
 
+class ShotAttempt(BaseModel):
+    game_id: str
+    event_id: int
+    player_id: int
+    player_name: str
+    team_id: int
+    team_abbr: str
+    opponent_id: int
+    opponent_abbr: str
+    season: str
+    period: int
+    minutes_remaining: int
+    seconds_remaining: int
+    action_type: str
+    shot_type: str
+    zone_basic: str
+    zone_area: str
+    zone_range: str
+    shot_distance: int
+    loc_x: int
+    loc_y: int
+    shot_made: bool
+
+
+class ShotZoneSummary(BaseModel):
+    zone_basic: str
+    zone_area: str
+    zone_range: str
+    attempts: int
+    makes: int
+    fg_pct: float | None = None
+
+
+class ShotChart(BaseModel):
+    season: str
+    subject_type: str
+    subject_id: int
+    attempts: int
+    makes: int
+    fg_pct: float | None = None
+    truncated: bool
+    data: list[ShotAttempt]
+    zones: list[ShotZoneSummary]
+
+
 class GameBoxScore(BaseModel):
     game: GameDetail
     home_players: list[PlayerGameStats]

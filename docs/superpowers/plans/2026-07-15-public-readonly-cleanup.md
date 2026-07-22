@@ -895,7 +895,7 @@ Expected: CI run completes green. If the test job fails in CI but passed locally
 
 **Interfaces:**
 - Consumes: route list from Task 2; role/env behavior from Task 6; Make targets from Task 7; live URL `https://nba-api-production-0cd7.up.railway.app`.
-- Produces: README describing the deployed read-only app. Note: the old README documented audit triggers, a `shots` table, and shot-chart endpoints that do not exist in the Postgres schema — they must NOT reappear.
+- Produces: README describing the deployed read-only app. At the time of this cleanup, the old README documented audit triggers and shot-chart features that did not exist; those claims were removed. Shot charts were later implemented end to end with a real schema, guarded lifecycle, API, and tests.
 
 - [ ] **Step 1: Replace README.md with:**
 
