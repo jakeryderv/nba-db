@@ -11,6 +11,11 @@ class FakeResponse:
     def __init__(self, body: Any, status: int = 200):
         self.body = body
         self.status_code = status
+        self.headers = {
+            "X-Request-ID": "test-request",
+            "X-Response-Time-Ms": "1.0",
+            "X-Content-Type-Options": "nosniff",
+        }
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -39,6 +44,8 @@ def _responses() -> dict[str, Any]:
         "/api/standings": [{"team_id": 1}],
         "/api/leaders/points": {"data": [{"player_id": 1}]},
         "/api/games": {"total": 1230, "data": [{"id": "1"}]},
+        "/api/teams": [{"id": 1}],
+        "/api/shot-chart": {"subject_id": 1, "zones": [{"zone_basic": "Restricted Area"}]},
     }
 
 
@@ -56,6 +63,7 @@ def test_live_check_verifies_complete_deployed_contract() -> None:
 
     assert result["status"] == "passed"
     assert result["counts"]["players"] == 5204
+    assert "shot_chart" in result["timings_ms"]
 
 
 def test_live_check_fails_closed_on_count_drift() -> None:
@@ -66,6 +74,18 @@ def test_live_check_fails_closed_on_count_drift() -> None:
 
     with pytest.raises(LiveCheckError, match="Expected 1231 games"):
         check_live("https://nba.example", expected={"games": 1231}, get=get)
+
+
+def test_live_check_requires_telemetry_headers() -> None:
+    bodies = _responses()
+
+    def get(url: str, **_kwargs: Any) -> FakeResponse:
+        response = FakeResponse(bodies[url.removeprefix("https://nba.example")])
+        response.headers = {}
+        return response
+
+    with pytest.raises(LiveCheckError, match="missing x-request-id"):
+        check_live("https://nba.example", get=get)
 
 
 @pytest.mark.parametrize(

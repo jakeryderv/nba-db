@@ -244,6 +244,38 @@ class NbaDbCi:
             .stdout()
         )
 
+    @function(cache="never")
+    async def restore_backup(
+        self,
+        backup: dagger.File,
+        season: str,
+        source: Annotated[dagger.Directory, DefaultPath(".")],
+    ) -> str:
+        """Restore and verify a real backup in an isolated PostgreSQL 18 service."""
+        return await (
+            self._with_test_database(self._test_base(source))
+            .with_file("/tmp/nba-db-production.dump", backup)
+            .with_env_variable(
+                "RECOVERY_DATABASE_URL",
+                "postgresql://nba_user:nba_password@database:5432/nba_db_recovery",
+            )
+            .with_exec(
+                [
+                    "uv",
+                    "run",
+                    "python",
+                    "scripts/restore_drill.py",
+                    "--season",
+                    season,
+                    "--backup-file",
+                    "/tmp/nba-db-production.dump",
+                    "--confirm",
+                    "RESTORE nba_db_recovery",
+                ]
+            )
+            .stdout()
+        )
+
     @function
     @up
     def dev(self, source: Annotated[dagger.Directory, DefaultPath(".")]) -> dagger.Service:

@@ -122,6 +122,7 @@ def run_restore_drill(
                 "pg_restore",
                 "--exit-on-error",
                 "--no-owner",
+                "--no-acl",
                 "--dbname",
                 make_conninfo("", **safe),
                 str(backup_file),

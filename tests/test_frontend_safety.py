@@ -10,13 +10,14 @@ import pytest
 
 TEMPLATE = Path(__file__).parents[1] / "app" / "templates" / "index.html"
 SCRIPT = Path(__file__).parents[1] / "app" / "static" / "app.js"
+CORE_SCRIPT = Path(__file__).parents[1] / "app" / "static" / "core.js"
 STYLES = Path(__file__).parents[1] / "app" / "static" / "styles.css"
 FAVICON = Path(__file__).parents[1] / "app" / "static" / "favicon.svg"
 
 
 def test_dynamic_actions_do_not_use_inline_javascript_handlers() -> None:
     html = TEMPLATE.read_text()
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     assert not re.search(r"<[^>]+\sonclick\s*=", html, re.IGNORECASE)
     assert 'data-action="player"' in javascript
@@ -25,7 +26,7 @@ def test_dynamic_actions_do_not_use_inline_javascript_handlers() -> None:
 
 
 def test_status_messages_are_inserted_as_text() -> None:
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     assert "status.textContent = message" in javascript
     assert "container.replaceChildren(status)" in javascript
@@ -38,10 +39,12 @@ def test_assets_are_external_and_compatible_with_strict_csp() -> None:
     assert '<link rel="stylesheet" href="/static/styles.css">' in html
     assert '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in html
     assert '<script src="/static/app.js" defer></script>' in html
+    assert '<script src="/static/core.js" defer></script>' in html
     assert "<style" not in html
     assert not re.search(r"<script(?!\s+src=)", html)
     assert not re.search(r"\sstyle\s*=", html, re.IGNORECASE)
     assert SCRIPT.exists()
+    assert CORE_SCRIPT.exists()
     assert STYLES.exists()
     assert FAVICON.exists()
 
@@ -49,7 +52,7 @@ def test_assets_are_external_and_compatible_with_strict_csp() -> None:
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 def test_html_escaping_and_zero_value_helpers() -> None:
     """Execute the small pure helpers without requiring a browser or DOM library."""
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     probe = """
 const values = {
@@ -77,7 +80,7 @@ process.stdout.write(JSON.stringify(values));
 
 
 def test_zero_values_are_not_coalesced_to_missing_markers() -> None:
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     for field in ("ppg", "rpg", "apg", "spg", "bpg", "games_played", "wins", "losses"):
         assert f"{field} || '-'" not in javascript
@@ -85,7 +88,7 @@ def test_zero_values_are_not_coalesced_to_missing_markers() -> None:
 
 def test_single_loaded_season_is_presented_as_a_label() -> None:
     html = TEMPLATE.read_text()
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     assert 'id="season-label"' in html
     assert 'id="season-select"' not in html
@@ -93,7 +96,7 @@ def test_single_loaded_season_is_presented_as_a_label() -> None:
 
 
 def test_detail_views_have_linkable_hash_routes() -> None:
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     assert "window.addEventListener('hashchange', route)" in javascript
     for detail in ("team", "player", "game"):
@@ -104,7 +107,7 @@ def test_detail_views_have_linkable_hash_routes() -> None:
 
 def test_shot_chart_is_accessible_and_uses_no_third_party_script() -> None:
     html = TEMPLATE.read_text()
-    javascript = SCRIPT.read_text()
+    javascript = CORE_SCRIPT.read_text() + "\n" + SCRIPT.read_text()
 
     assert 'id="shot-chart-form"' in html
     assert 'aria-live="polite"' in html

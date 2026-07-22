@@ -4,19 +4,18 @@ import csv
 import io
 import logging
 import mimetypes
-import re
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from time import perf_counter
 from typing import Annotated, Literal
-from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.db import close_pool, get_cursor
+from app.middleware import RequestPolicyMiddleware
 from app.models import (
     DatasetCounts,
     DatasetStatus,
@@ -49,6 +48,7 @@ from app.models import (
     TeamSeasonSummary,
     TeamStanding,
 )
+from app.shot_filters import HomeAway, ShotType, shot_query_parts
 from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,8 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
+app.add_middleware(RequestPolicyMiddleware)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -74,66 +76,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 # JavaScript responses consistent across Dagger, local, and production hosts.
 mimetypes.add_type("text/javascript", ".js")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-@app.middleware("http")
-async def add_cache_headers(request: Request, call_next):
-    started = perf_counter()
-    supplied_request_id = request.headers.get("X-Request-ID", "")
-    request_id = (
-        supplied_request_id
-        if re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", supplied_request_id)
-        else uuid4().hex
-    )
-    request.state.request_id = request_id
-    try:
-        response = await call_next(request)
-    except Exception:
-        logger.exception(
-            "Unhandled request request_id=%s method=%s path=%s",
-            request_id,
-            request.method,
-            request.url.path,
-        )
-        raise
-    elapsed_ms = (perf_counter() - started) * 1000
-    response.headers["X-Request-ID"] = request_id
-    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
-    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
-    if elapsed_ms >= 1000:
-        logger.warning(
-            "Slow request method=%s path=%s duration_ms=%.1f status=%s",
-            request.method,
-            request.url.path,
-            elapsed_ms,
-            response.status_code,
-        )
-    else:
-        logger.info(
-            "Request request_id=%s method=%s path=%s duration_ms=%.1f status=%s",
-            request_id,
-            request.method,
-            request.url.path,
-            elapsed_ms,
-            response.status_code,
-        )
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self'; style-src 'self'; "
-        "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
-        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-    )
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    if request.method == "GET" and response.status_code < 400:
-        if request.url.path == "/health":
-            response.headers["Cache-Control"] = "no-store"
-        elif request.url.path == "/":
-            response.headers["Cache-Control"] = "no-cache"
-        elif request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
-        elif request.url.path.startswith("/api/"):
-            response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
-    return response
 
 
 # === Web Interface ===
@@ -567,69 +509,6 @@ def get_player_games(
 # === Shot charts ===
 
 
-ShotType = Literal["2PT Field Goal", "3PT Field Goal"]
-HomeAway = Literal["home", "away"]
-
-
-def _shot_query_parts(
-    *,
-    season: str,
-    subject_column: str,
-    subject_id: int,
-    game_id: str | None,
-    opponent_id: int | None,
-    period: int | None,
-    shot_type: ShotType | None,
-    action_type: str | None,
-    home_away: HomeAway | None,
-    date_from: date | None,
-    date_to: date | None,
-    made: bool | None,
-) -> tuple[str, list[object], str, list[object], str]:
-    if date_from and date_to and date_from > date_to:
-        raise HTTPException(status_code=422, detail="date_from must not be after date_to")
-    context_conditions = ["sa.season = %s"]
-    context_params: list[object] = [season]
-    for value, clause in (
-        (game_id, "sa.game_id = %s"),
-        (opponent_id, "opponent.id = %s"),
-        (period, "sa.period = %s"),
-        (shot_type, "sa.shot_type = %s"),
-        (action_type, "sa.action_type = %s"),
-        (date_from, "g.game_date >= %s"),
-        (date_to, "g.game_date <= %s"),
-    ):
-        if value is not None:
-            context_conditions.append(clause)
-            context_params.append(value)
-    if home_away == "home":
-        context_conditions.append("g.home_team_id = sa.team_id")
-    elif home_away == "away":
-        context_conditions.append("g.away_team_id = sa.team_id")
-
-    conditions = [*context_conditions, f"{subject_column} = %s"]
-    params = [*context_params, subject_id]
-    if made is not None:
-        conditions.append("sa.shot_made = %s")
-        params.append(made)
-    joins = """
-        FROM shot_attempts sa
-        JOIN players p ON p.id = sa.player_id
-        JOIN teams team ON team.id = sa.team_id
-        JOIN games g ON g.id = sa.game_id
-        JOIN teams opponent ON opponent.id = CASE
-            WHEN g.home_team_id = sa.team_id THEN g.away_team_id ELSE g.home_team_id
-        END
-    """
-    return (
-        " AND ".join(conditions),
-        params,
-        " AND ".join(context_conditions),
-        context_params,
-        joins,
-    )
-
-
 def _shot_subject(player_id: int | None, team_id: int | None) -> tuple[str, int, str, str]:
     if (player_id is None) == (team_id is None):
         raise HTTPException(status_code=422, detail="Provide exactly one player_id or team_id")
@@ -731,7 +610,7 @@ def export_shot_chart_csv(
 ) -> Response:
     """Download every matching attempt for one player or team as CSV."""
     subject_type, subject_id, subject_column, entity_table = _shot_subject(player_id, team_id)
-    where_clause, params, _, _, joins = _shot_query_parts(
+    where_clause, params, _, _, joins = shot_query_parts(
         season=season,
         subject_column=subject_column,
         subject_id=subject_id,
@@ -825,7 +704,7 @@ def get_shot_chart(
 ) -> ShotChart:
     """Return bounded shot locations plus complete zone aggregates for one subject."""
     subject_type, subject_id, subject_column, entity_table = _shot_subject(player_id, team_id)
-    where_clause, params, context_where_clause, context_params, joins = _shot_query_parts(
+    where_clause, params, context_where_clause, context_params, joins = shot_query_parts(
         season=season,
         subject_column=subject_column,
         subject_id=subject_id,
@@ -1012,7 +891,7 @@ def get_shot_profile(
 ) -> ShotProfile:
     """Summarize one subject by normalized area and within-season splits."""
     subject_type, subject_id, subject_column, entity_table = _shot_subject(player_id, team_id)
-    where_clause, params, _, _, joins = _shot_query_parts(
+    where_clause, params, _, _, joins = shot_query_parts(
         season=season,
         subject_column=subject_column,
         subject_id=subject_id,

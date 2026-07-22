@@ -1,42 +1,7 @@
+const {h, present, pct, showStatus, showLoading, showError, api} = globalThis.NbaCore;
 let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotActionTypes = [], ready = false, activeSection = 'standings', shotGamesRequest = 0;
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
         const sections = new Set(['standings', 'leaders', 'games', 'shots', 'players', 'compare']);
-
-        const HTML_ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
-
-        // All API/database values must pass through this helper before insertion
-        // into an HTML template. Event arguments are stored in escaped data
-        // attributes and handled by the delegated click listener below.
-        function h(value) {
-            return String(value ?? '').replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
-        }
-
-        function present(value, fallback = '-') {
-            return value === null || value === undefined || value === '' ? fallback : value;
-        }
-
-        function pct(value) {
-            const number = Number(value);
-            return value === null || value === undefined || value === '' || !Number.isFinite(number)
-                ? '-'
-                : `${(number * 100).toFixed(1)}%`;
-        }
-
-        function showStatus(container, kind, message) {
-            const status = document.createElement('div');
-            status.className = kind;
-            status.textContent = message;
-            status.setAttribute('role', kind === 'error' ? 'alert' : 'status');
-            container.replaceChildren(status);
-        }
-
-        function showLoading(container, subject) {
-            showStatus(container, 'loading', `Loading ${subject}`);
-        }
-
-        function showError(container, subject, error) {
-            showStatus(container, 'error', `Error loading ${subject}: ${error.message}`);
-        }
 
         document.addEventListener('DOMContentLoaded', async () => {
             let searchTimeout;
@@ -132,12 +97,6 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotAct
                 showError(document.getElementById('standings-table'), 'application', error);
             }
         });
-
-        async function api(url) {
-            const r = await fetch(url);
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json();
-        }
 
         function parseRoute() {
             const [path, query = ''] = window.location.hash.slice(1).split('?');

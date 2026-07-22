@@ -14,7 +14,7 @@ A read-only web app and REST API for exploring NBA statistics — standings, sta
 
 | Component | Technology |
 |-----------|------------|
-| Database | PostgreSQL 16 (Docker locally, Railway in production) |
+| Database | PostgreSQL 16 locally; PostgreSQL 18 in Dagger, staging, and production |
 | Language | Python 3.11 |
 | Web framework | FastAPI + psycopg 3 |
 | Package manager | uv |
@@ -252,6 +252,16 @@ Only after this drill passes should an operator schedule a controlled production
 production restore remains a manual incident operation because it replaces the entire database
 state, including seasons that promotion removed.
 
+The same drill can run without host PostgreSQL client tools by passing the backup as a typed Dagger
+file. Dagger creates and removes an isolated PostgreSQL 18 service for the operation:
+
+```bash
+dagger call restore-backup \
+  --backup="$HOME/.local/share/nba-db/backups/<backup>.dump" \
+  --season=2025-26 \
+  --source=.
+```
+
 ### Production monitoring
 
 `/health` checks database connectivity while `/ready` additionally fails unless the verified default
@@ -265,10 +275,16 @@ Run a bounded live contract check at any time:
 make live-check API_URL=https://nba-api-production-0cd7.up.railway.app
 ```
 
-The scheduled GitHub workflow runs this check when the repository variable `LIVE_API_URL` is set.
-Its expected production totals are 1,230 games and 219,160 shots, so count drift, readiness failure,
-or broken core exploration endpoints fails the scheduled job. Use Railway's HTTP metrics and logs
-with the returned request ID to investigate latency or errors.
+The scheduled and manually dispatched GitHub workflow runs this check using the configured
+`LIVE_API_URL` repository variable. Its expected production totals are 1,230 games, 582
+participating players, and 219,160 shots. Count drift, readiness failure, missing telemetry headers,
+a response over three seconds, or a broken core/shot exploration endpoint fails the job. Use
+Railway's HTTP metrics and logs with the returned request ID to investigate latency or errors.
+
+The public API applies a process-local sliding-window limit per client. Ordinary API reads default
+to 600 requests per minute; the aggregate-heavy shot chart, shot profile, and CSV routes default to
+120. Large responses use gzip when the client advertises support. Override the limits with the
+documented environment variables only after reviewing production traffic.
 
 ## Testing
 
@@ -291,6 +307,10 @@ make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 | `RECOVERY_DATABASE_URL` | Drill-only connection string whose database name ends in `_recovery` |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` | Individual settings for local development |
 | `READONLY_DB_PASSWORD` | Optional. When set, `init_db.py` provisions a SELECT-only `nba_readonly` role and the web app connects as it |
+| `RATE_LIMIT_ENABLED` | Enable public API rate limiting (default `true`) |
+| `RATE_LIMIT_REQUESTS` | Per-client ordinary API requests per window (default `600`) |
+| `RATE_LIMIT_EXPENSIVE_REQUESTS` | Per-client shot analytics/export requests per window (default `120`) |
+| `RATE_LIMIT_WINDOW_SECONDS` | Sliding rate-limit window (default `60`) |
 
 ## Deployment
 
@@ -298,16 +318,39 @@ Deployed on [Railway](https://railway.com) (`railway.toml`) after the required G
 
 Schema migration files are immutable after they have been applied. To change the database, add the next numbered file under `db/schema/`; editing an applied file causes initialization to fail with a checksum error.
 
+### Verified artifact retention
+
+The production Railway project contains the `nba-db-artifacts` S3-compatible bucket. Archive the
+raw NBA responses, clean CSVs, verification report, and manifest only after manifest verification
+passes. The command refuses repository-local output and existing filenames, writes a SHA-256
+sidecar and JSON receipt, and verifies checksum metadata after upload.
+
+```bash
+install -d -m 700 "$HOME/.local/share/nba-db/artifacts"
+set -a
+eval "$(railway bucket credentials --bucket nba-db-artifacts --environment production)"
+set +a
+make artifact-upload SEASON=2025-26 ARTIFACT_DIR="$HOME/.local/share/nba-db/artifacts"
+make backup-upload SEASON=2025-26 BACKUP_FILE="$HOME/.local/share/nba-db/backups/<backup>.dump"
+unset AWS_ENDPOINT_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_S3_BUCKET_NAME AWS_DEFAULT_REGION
+```
+
+The uploader is an operator-only optional dependency (`uv run --extra ops`) and is not imported by
+the web service. Object keys are versioned beneath `verified-seasons/<season>/` using an archive name
+that includes the verified manifest checksum.
+
 ## Roadmap
 
-- [ ] Stage and promote the already verified complete 2025-26 dataset
+- [x] Stage and promote the verified complete 2025-26 dataset
 - [x] Dataset freshness/provenance endpoint and visible verification status
 - [x] Shot charts, contextual filters, five-zone profiles, in-season splits, exports, and comparisons
 - [x] Browser acceptance coverage for primary, mobile, empty, error, sharing, and export flows
-- [x] Readiness, request telemetry, scheduled live checks, and executable backup restore drill
-- [ ] Tune further only from production HTTP metrics and query plans
-- [ ] Schedule trusted-machine extraction and staging; retain manual production approval
-- [ ] Deferred: historical backfill, multi-season promotion, and cross-season analysis
+- [x] Readiness, request telemetry, scheduled live checks, rate protection, and gzip responses
+- [x] Durable verified-dataset archive packaging and Railway object storage
+- [x] Production backup restore-tested on PostgreSQL 18 and retained with checksum metadata
+- [x] Separate HTTP policy, shot-filter, and frontend core modules from the main application files
+- [ ] Continue tuning only from production HTTP metrics and query plans
+- [ ] Deferred by product scope: historical backfill, multi-season promotion, and cross-season analysis
 
 ## License
 

@@ -1,4 +1,4 @@
-.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-stage season-promote require-season require-staging require-promotion live-check restore-drill test test-data clean seasons status lint format format-check docs typecheck check dagger-check api
+.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-stage season-promote require-season require-staging require-promotion live-check restore-drill artifact-archive artifact-upload backup-upload test test-data clean seasons status lint format format-check docs typecheck check dagger-check api
 
 # Configuration
 SEASON ?= 2025-26
@@ -9,6 +9,7 @@ BACKUP_FILE ?=
 API_URL ?=
 STAGING_API_URL ?=
 RESTORE_CONFIRM ?=
+ARTIFACT_DIR ?=
 
 # Default target
 help:
@@ -33,6 +34,9 @@ help:
 	@echo "  make season-promote     - Back up and replace production with typed confirmations"
 	@echo "  make live-check         - Verify deployed health, provenance, and core reads"
 	@echo "  make restore-drill      - Restore and verify a backup in a disposable database"
+	@echo "  make artifact-archive  - Package verified raw/clean data outside the repository"
+	@echo "  make artifact-upload   - Package and upload verified data to S3-compatible storage"
+	@echo "  make backup-upload     - Upload and checksum-verify a production backup"
 	@echo ""
 	@echo "Data preparation:"
 	@echo "  make extract     - Download data from NBA API"
@@ -169,6 +173,18 @@ restore-drill: require-season
 	@test "$(origin RECOVERY_DATABASE_URL)" != "command line" || (echo "ERROR: export RECOVERY_DATABASE_URL; do not pass it as a make argument" && exit 2)
 	@test -n "$$RECOVERY_DATABASE_URL" || (echo "ERROR: export RECOVERY_DATABASE_URL" && exit 2)
 	uv run python scripts/restore_drill.py --season "$(SEASON)" --backup-file "$(BACKUP_FILE)" --confirm "$(RESTORE_CONFIRM)"
+
+artifact-archive: require-season
+	@test -n "$(strip $(ARTIFACT_DIR))" || (echo "ERROR: set ARTIFACT_DIR outside the repository" && exit 2)
+	uv run python scripts/archive_dataset.py --season "$(SEASON)" --output-dir "$(ARTIFACT_DIR)"
+
+artifact-upload: require-season
+	@test -n "$(strip $(ARTIFACT_DIR))" || (echo "ERROR: set ARTIFACT_DIR outside the repository" && exit 2)
+	uv run --extra ops python scripts/archive_dataset.py --season "$(SEASON)" --output-dir "$(ARTIFACT_DIR)" --upload
+
+backup-upload: require-season
+	@test -n "$(strip $(BACKUP_FILE))" || (echo "ERROR: set BACKUP_FILE to a protected .dump path" && exit 2)
+	uv run --extra ops python scripts/upload_backup.py --season "$(SEASON)" --backup-file "$(BACKUP_FILE)"
 
 # Info commands
 seasons:

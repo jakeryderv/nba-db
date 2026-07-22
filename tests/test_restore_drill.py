@@ -35,6 +35,62 @@ def test_recovery_config_refuses_production_url(monkeypatch) -> None:
         recovery_config(url, "RESTORE nba_recovery")
 
 
+def test_restore_omits_environment_specific_owners_and_acls(monkeypatch, tmp_path) -> None:
+    from scripts import restore_drill
+
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"archive")
+    commands: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+
+    def runner(command, **_kwargs):
+        commands.append(command)
+        return Result()
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, *_args):
+            return None
+
+        def fetchone(self):
+            return None
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def cursor(self):
+            return Cursor()
+
+    monkeypatch.setattr(restore_drill.psycopg, "connect", lambda **_kwargs: Connection())
+    monkeypatch.setattr(
+        restore_drill,
+        "verify_restored_database",
+        lambda *_args: {"games": 1, "players": 1, "shot_attempts": 1},
+    )
+
+    restore_drill.run_restore_drill(
+        backup,
+        {"dbname": "nba_test_recovery", "host": "database", "user": "nba_user"},
+        "2025-26",
+        runner=runner,
+    )
+
+    restore_command = commands[1]
+    assert "--no-owner" in restore_command
+    assert "--no-acl" in restore_command
+
+
 @pytest.mark.skipif(
     shutil.which("pg_dump") is None or shutil.which("pg_restore") is None,
     reason="PostgreSQL client tools are not installed",
