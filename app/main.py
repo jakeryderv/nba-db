@@ -447,6 +447,42 @@ def list_shot_chart_players(
         return [Player(**row) for row in cur.fetchall()]
 
 
+@app.get("/api/shot-chart/games", response_model=list[GameDetail], tags=["Shot Charts"])
+def list_shot_chart_games(
+    season: str = Query(..., description="Season (required)"),
+    player_id: int | None = Query(None, description="Player subject"),
+    team_id: int | None = Query(None, description="Team subject"),
+) -> list[GameDetail]:
+    """List games containing shot attempts for exactly one player or team."""
+    if (player_id is None) == (team_id is None):
+        raise HTTPException(status_code=422, detail="Provide exactly one player_id or team_id")
+
+    subject_column = "sa.player_id" if player_id is not None else "sa.team_id"
+    subject_id = player_id if player_id is not None else team_id
+    subject_type = "player" if player_id is not None else "team"
+    entity_table = "players" if player_id is not None else "teams"
+    with get_cursor() as cur:
+        cur.execute(f"SELECT 1 FROM {entity_table} WHERE id = %s", (subject_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"{subject_type.title()} not found")
+        cur.execute(
+            f"""
+            SELECT g.*, home.full_name AS home_team, away.full_name AS away_team
+            FROM games g
+            JOIN teams home ON home.id = g.home_team_id
+            JOIN teams away ON away.id = g.away_team_id
+            WHERE g.season = %s
+              AND EXISTS (
+                  SELECT 1 FROM shot_attempts sa
+                  WHERE sa.game_id = g.id AND {subject_column} = %s
+              )
+            ORDER BY g.game_date DESC NULLS LAST, g.id DESC
+            """,
+            (season, subject_id),
+        )
+        return [GameDetail(**row) for row in cur.fetchall()]
+
+
 @app.get("/api/shot-chart", response_model=ShotChart, tags=["Shot Charts"])
 def get_shot_chart(
     season: str = Query(..., description="Season (required)"),
@@ -467,21 +503,27 @@ def get_shot_chart(
     subject_id = player_id if player_id is not None else team_id
     assert subject_id is not None
     subject_column = "sa.player_id" if player_id is not None else "sa.team_id"
-    conditions = ["sa.season = %s", f"{subject_column} = %s"]
-    params: list[object] = [season, subject_id]
+    context_conditions = ["sa.season = %s"]
+    context_params: list[object] = [season]
 
     for value, clause in (
         (game_id, "sa.game_id = %s"),
         (opponent_id, "opponent.id = %s"),
         (period, "sa.period = %s"),
-        (made, "sa.shot_made = %s"),
         (shot_type, "sa.shot_type = %s"),
     ):
         if value is not None:
-            conditions.append(clause)
-            params.append(value)
+            context_conditions.append(clause)
+            context_params.append(value)
+
+    conditions = [*context_conditions, f"{subject_column} = %s"]
+    params = [*context_params, subject_id]
+    if made is not None:
+        conditions.append("sa.shot_made = %s")
+        params.append(made)
 
     where_clause = " AND ".join(conditions)
+    context_where_clause = " AND ".join(context_conditions)
     joins = """
         FROM shot_attempts sa
         JOIN players p ON p.id = sa.player_id
@@ -501,16 +543,45 @@ def get_shot_chart(
             f"""
             SELECT COUNT(*) AS attempts,
                    COUNT(*) FILTER (WHERE sa.shot_made) AS makes,
+                   COALESCE(SUM(
+                       CASE WHEN sa.shot_made
+                           THEN CASE WHEN sa.shot_type = '3PT Field Goal' THEN 3 ELSE 2 END
+                           ELSE 0
+                       END
+                   ), 0) AS points,
                    ROUND(
                        COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
                        / NULLIF(COUNT(*), 0), 3
-                   ) AS fg_pct
+                   ) AS fg_pct,
+                   ROUND(
+                       SUM(
+                           CASE WHEN sa.shot_made
+                               THEN CASE WHEN sa.shot_type = '3PT Field Goal' THEN 3 ELSE 2 END
+                               ELSE 0
+                           END
+                       )::NUMERIC / NULLIF(COUNT(*), 0), 3
+                   ) AS points_per_shot
             {joins}
             WHERE {where_clause}
             """,
             params,
         )
         summary = cur.fetchone()
+
+        league_fg_pct = None
+        if made is None:
+            cur.execute(
+                f"""
+                SELECT ROUND(
+                    COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
+                    / NULLIF(COUNT(*), 0), 3
+                ) AS fg_pct
+                {joins}
+                WHERE {context_where_clause}
+                """,
+                context_params,
+            )
+            league_fg_pct = cur.fetchone()["fg_pct"]
 
         cur.execute(
             f"""
@@ -530,10 +601,24 @@ def get_shot_chart(
             SELECT sa.zone_basic, sa.zone_area, sa.zone_range,
                    COUNT(*) AS attempts,
                    COUNT(*) FILTER (WHERE sa.shot_made) AS makes,
+                   COALESCE(SUM(
+                       CASE WHEN sa.shot_made
+                           THEN CASE WHEN sa.shot_type = '3PT Field Goal' THEN 3 ELSE 2 END
+                           ELSE 0
+                       END
+                   ), 0) AS points,
                    ROUND(
                        COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
                        / NULLIF(COUNT(*), 0), 3
-                   ) AS fg_pct
+                   ) AS fg_pct,
+                   ROUND(
+                       SUM(
+                           CASE WHEN sa.shot_made
+                               THEN CASE WHEN sa.shot_type = '3PT Field Goal' THEN 3 ELSE 2 END
+                               ELSE 0
+                           END
+                       )::NUMERIC / NULLIF(COUNT(*), 0), 3
+                   ) AS points_per_shot
             {joins}
             WHERE {where_clause}
             GROUP BY sa.zone_basic, sa.zone_area, sa.zone_range
@@ -541,9 +626,53 @@ def get_shot_chart(
             """,
             params,
         )
-        zones = [ShotZoneSummary(**row) for row in cur.fetchall()]
+        zone_rows = cur.fetchall()
+
+        league_zones: dict[tuple[str, str, str], float | None] = {}
+        if made is None:
+            cur.execute(
+                f"""
+                SELECT sa.zone_basic, sa.zone_area, sa.zone_range,
+                       ROUND(
+                           COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
+                           / NULLIF(COUNT(*), 0), 3
+                       ) AS fg_pct
+                {joins}
+                WHERE {context_where_clause}
+                GROUP BY sa.zone_basic, sa.zone_area, sa.zone_range
+                """,
+                context_params,
+            )
+            league_zones = {
+                (row["zone_basic"], row["zone_area"], row["zone_range"]): (
+                    float(row["fg_pct"]) if row["fg_pct"] is not None else None
+                )
+                for row in cur.fetchall()
+            }
 
     total = summary["attempts"]
+    zones = []
+    for row in zone_rows:
+        key = (row["zone_basic"], row["zone_area"], row["zone_range"])
+        zone_league_fg_pct = league_zones.get(key)
+        zone_fg_pct = row["fg_pct"]
+        zones.append(
+            ShotZoneSummary(
+                **row,
+                frequency=round(row["attempts"] / total, 3) if total else 0,
+                league_fg_pct=zone_league_fg_pct,
+                fg_pct_vs_league=(
+                    round(float(zone_fg_pct) - float(zone_league_fg_pct), 3)
+                    if zone_fg_pct is not None and zone_league_fg_pct is not None
+                    else None
+                ),
+            )
+        )
+    fg_pct_vs_league = (
+        round(float(summary["fg_pct"]) - float(league_fg_pct), 3)
+        if summary["fg_pct"] is not None and league_fg_pct is not None
+        else None
+    )
     return ShotChart(
         season=season,
         subject_type=subject_type,
@@ -551,6 +680,10 @@ def get_shot_chart(
         attempts=total,
         makes=summary["makes"],
         fg_pct=summary["fg_pct"],
+        points=summary["points"],
+        points_per_shot=summary["points_per_shot"],
+        league_fg_pct=league_fg_pct,
+        fg_pct_vs_league=fg_pct_vs_league,
         truncated=total > len(attempts),
         data=attempts,
         zones=zones,

@@ -218,11 +218,12 @@
         .shot-summary h3 { color: var(--text); font-size: 1rem; }
         .shot-summary strong { font-size: 1.5rem; }
         .shot-summary span { color: var(--text-muted); grid-column: 1 / -1; }
-        .shot-layout {
+        .shot-visual-grid {
             display: grid;
-            grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+            grid-template-columns: repeat(2, minmax(320px, 1fr));
             gap: 1.25rem;
             align-items: start;
+            margin-bottom: 1.25rem;
         }
         .shot-court-card {
             padding: 1rem;
@@ -246,6 +247,9 @@
         .shot-marker.shot-series-2 { fill: #f59e0b; stroke: #fde68a; }
         .shot-marker.missed { fill: transparent; opacity: 0.5; stroke-width: 2; }
         .shot-marker.made { opacity: 0.8; stroke-width: 1; }
+        .shot-heat-cell { mix-blend-mode: screen; stroke-width: 1; }
+        .shot-heat-cell.shot-series-1 { fill: #2563eb; stroke: #93c5fd; }
+        .shot-heat-cell.shot-series-2 { fill: #d97706; stroke: #fcd34d; }
         .shot-legend {
             display: flex;
             flex-wrap: wrap;
@@ -269,6 +273,30 @@
             border-radius: 8px;
         }
         .shot-zones td { min-width: 130px; }
+        .detail-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin: 0.75rem 0 1.25rem;
+        }
+        .secondary-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.55rem 0.85rem;
+            color: var(--text);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .secondary-button:hover, .secondary-button:focus-visible,
+        .context-link:hover, .context-link:focus-visible {
+            color: var(--accent-light);
+            border-color: var(--accent);
+        }
+        .context-link { color: var(--accent-blue); font-weight: 600; }
         .search-box {
             position: relative;
         }
@@ -913,7 +941,7 @@
             .compare-controls { grid-template-columns: 1fr; }
             .compare-versus { display: none; }
             .comparison-grid { grid-template-columns: 1fr; }
-            .shot-layout { grid-template-columns: 1fr; }
+            .shot-visual-grid { grid-template-columns: 1fr; }
             .shot-controls { grid-template-columns: 1fr; }
         }
         @media (prefers-reduced-motion: reduce) {
