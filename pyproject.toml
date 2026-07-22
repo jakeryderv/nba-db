@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
-    "nba-api>=1.11.3",
+    "nba-api>=1.11.4",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
     "psycopg[binary]>=3.2.0",

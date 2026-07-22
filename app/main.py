@@ -25,6 +25,9 @@ from app.models import (
     PlayerList,
     PlayerSeasonAvg,
     Season,
+    ShotAttempt,
+    ShotChart,
+    ShotZoneSummary,
     StatLeader,
     Team,
     TeamComparison,
@@ -415,6 +418,143 @@ def get_player_games(
             (player_id, season, limit, offset),
         )
         return PlayerGameLog(data=cur.fetchall(), total=total, limit=limit, offset=offset)
+
+
+# === Shot charts ===
+
+
+ShotType = Literal["2PT Field Goal", "3PT Field Goal"]
+
+
+@app.get("/api/shot-chart/players", response_model=list[Player], tags=["Shot Charts"])
+def list_shot_chart_players(
+    season: str = Query(..., description="Season (required)"),
+) -> list[Player]:
+    """List only players who have shot attempts in the selected season."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT p.*
+            FROM players p
+            WHERE EXISTS (
+                SELECT 1 FROM shot_attempts sa
+                WHERE sa.player_id = p.id AND sa.season = %s
+            )
+            ORDER BY p.full_name, p.id
+            """,
+            (season,),
+        )
+        return [Player(**row) for row in cur.fetchall()]
+
+
+@app.get("/api/shot-chart", response_model=ShotChart, tags=["Shot Charts"])
+def get_shot_chart(
+    season: str = Query(..., description="Season (required)"),
+    player_id: int | None = Query(None, description="Player subject"),
+    team_id: int | None = Query(None, description="Team subject"),
+    game_id: str | None = Query(None),
+    opponent_id: int | None = Query(None),
+    period: int | None = Query(None, ge=1, le=20),
+    made: bool | None = Query(None),
+    shot_type: Annotated[ShotType | None, Query()] = None,
+    max_points: int = Query(10000, ge=100, le=10000),
+) -> ShotChart:
+    """Return bounded shot locations plus complete zone aggregates for one subject."""
+    if (player_id is None) == (team_id is None):
+        raise HTTPException(status_code=422, detail="Provide exactly one player_id or team_id")
+
+    subject_type = "player" if player_id is not None else "team"
+    subject_id = player_id if player_id is not None else team_id
+    assert subject_id is not None
+    subject_column = "sa.player_id" if player_id is not None else "sa.team_id"
+    conditions = ["sa.season = %s", f"{subject_column} = %s"]
+    params: list[object] = [season, subject_id]
+
+    for value, clause in (
+        (game_id, "sa.game_id = %s"),
+        (opponent_id, "opponent.id = %s"),
+        (period, "sa.period = %s"),
+        (made, "sa.shot_made = %s"),
+        (shot_type, "sa.shot_type = %s"),
+    ):
+        if value is not None:
+            conditions.append(clause)
+            params.append(value)
+
+    where_clause = " AND ".join(conditions)
+    joins = """
+        FROM shot_attempts sa
+        JOIN players p ON p.id = sa.player_id
+        JOIN teams team ON team.id = sa.team_id
+        JOIN games g ON g.id = sa.game_id
+        JOIN teams opponent ON opponent.id = CASE
+            WHEN g.home_team_id = sa.team_id THEN g.away_team_id ELSE g.home_team_id
+        END
+    """
+    with get_cursor() as cur:
+        entity_table = "players" if player_id is not None else "teams"
+        cur.execute(f"SELECT 1 FROM {entity_table} WHERE id = %s", (subject_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"{subject_type.title()} not found")
+
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS attempts,
+                   COUNT(*) FILTER (WHERE sa.shot_made) AS makes,
+                   ROUND(
+                       COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
+                       / NULLIF(COUNT(*), 0), 3
+                   ) AS fg_pct
+            {joins}
+            WHERE {where_clause}
+            """,
+            params,
+        )
+        summary = cur.fetchone()
+
+        cur.execute(
+            f"""
+            SELECT sa.*, p.full_name AS player_name, team.abbreviation AS team_abbr,
+                   opponent.id AS opponent_id, opponent.abbreviation AS opponent_abbr
+            {joins}
+            WHERE {where_clause}
+            ORDER BY g.game_date, sa.game_id, sa.event_id
+            LIMIT %s
+            """,
+            [*params, max_points],
+        )
+        attempts = [ShotAttempt(**row) for row in cur.fetchall()]
+
+        cur.execute(
+            f"""
+            SELECT sa.zone_basic, sa.zone_area, sa.zone_range,
+                   COUNT(*) AS attempts,
+                   COUNT(*) FILTER (WHERE sa.shot_made) AS makes,
+                   ROUND(
+                       COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
+                       / NULLIF(COUNT(*), 0), 3
+                   ) AS fg_pct
+            {joins}
+            WHERE {where_clause}
+            GROUP BY sa.zone_basic, sa.zone_area, sa.zone_range
+            ORDER BY attempts DESC, sa.zone_basic, sa.zone_area, sa.zone_range
+            """,
+            params,
+        )
+        zones = [ShotZoneSummary(**row) for row in cur.fetchall()]
+
+    total = summary["attempts"]
+    return ShotChart(
+        season=season,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        attempts=total,
+        makes=summary["makes"],
+        fg_pct=summary["fg_pct"],
+        truncated=total > len(attempts),
+        data=attempts,
+        zones=zones,
+    )
 
 
 # === Comparisons ===

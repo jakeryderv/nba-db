@@ -93,6 +93,7 @@ def test_representative_read_endpoints_respond_promptly(client):
         f"/api/teams/{LAKERS}/stats?season={SEED_SEASON}",
         f"/api/teams/{LAKERS}/players?season={SEED_SEASON}",
         f"/api/players/{LEBRON}/games?season={SEED_SEASON}",
+        f"/api/shot-chart?season={SEED_SEASON}&player_id={LEBRON}",
         "/api/games/0022400001/boxscore",
     ]
 
@@ -233,6 +234,101 @@ def test_player_game_log(client):
 
 def test_player_game_log_rejects_unknown_player(client):
     assert client.get("/api/players/1/games", params={"season": SEED_SEASON}).status_code == 404
+
+
+def test_shot_chart_players_only_lists_players_with_attempts(client):
+    response = client.get("/api/shot-chart/players", params={"season": SEED_SEASON})
+
+    assert response.status_code == 200
+    assert [player["id"] for player in response.json()] == [TATUM, LEBRON]
+
+
+def test_player_shot_chart_returns_locations_summary_and_zones(client):
+    response = client.get(
+        "/api/shot-chart",
+        params={"season": SEED_SEASON, "player_id": LEBRON},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["subject_type"] == "player"
+    assert body["subject_id"] == LEBRON
+    assert (body["makes"], body["attempts"], body["fg_pct"]) == (120, 200, 0.6)
+    assert body["truncated"] is False
+    assert len(body["data"]) == 200
+    assert {
+        "game_id": "0022400001",
+        "event_id": 1,
+        "player_name": "LeBron James",
+        "team_abbr": "LAL",
+        "opponent_id": CELTICS,
+        "opponent_abbr": "BOS",
+        "shot_type": "3PT Field Goal",
+        "shot_made": True,
+    }.items() <= body["data"][0].items()
+    zones = {zone["zone_basic"]: zone for zone in body["zones"]}
+    assert zones["Above the Break 3"] == {
+        "zone_basic": "Above the Break 3",
+        "zone_area": "Center(C)",
+        "zone_range": "24+ ft.",
+        "attempts": 60,
+        "makes": 20,
+        "fg_pct": 0.333,
+    }
+    assert zones["Restricted Area"]["attempts"] == 140
+
+
+def test_team_shot_chart_filters_and_reports_truncation(client):
+    response = client.get(
+        "/api/shot-chart",
+        params={
+            "season": SEED_SEASON,
+            "team_id": LAKERS,
+            "game_id": "0022400001",
+            "opponent_id": CELTICS,
+            "period": 1,
+            "made": True,
+            "shot_type": "3PT Field Goal",
+            "max_points": 100,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["subject_type"] == "team"
+    assert body["attempts"] == 2
+    assert body["makes"] == 2
+    assert all(shot["period"] == 1 and shot["shot_made"] for shot in body["data"])
+
+    truncated = client.get(
+        "/api/shot-chart",
+        params={"season": SEED_SEASON, "team_id": LAKERS, "max_points": 100},
+    ).json()
+    assert truncated["attempts"] == 200
+    assert len(truncated["data"]) == 100
+    assert truncated["truncated"] is True
+
+
+def test_shot_chart_requires_one_known_subject_and_valid_filters(client):
+    assert client.get("/api/shot-chart", params={"season": SEED_SEASON}).status_code == 422
+    assert (
+        client.get(
+            "/api/shot-chart",
+            params={"season": SEED_SEASON, "player_id": LEBRON, "team_id": LAKERS},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get("/api/shot-chart", params={"season": SEED_SEASON, "player_id": 1}).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/shot-chart",
+            params={"season": SEED_SEASON, "player_id": LEBRON, "period": 21},
+        ).status_code
+        == 422
+    )
 
 
 def test_list_games_filtered_by_season_and_team(client):

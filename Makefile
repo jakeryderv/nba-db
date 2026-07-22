@@ -195,4 +195,4 @@ status:
 	@docker compose exec db psql -U nba_user -d nba_db -c "\dt" 2>/dev/null || echo "Database not running"
 	@echo ""
 	@echo "=== Row Counts ==="
-	@docker compose exec db psql -U nba_user -d nba_db -c "SELECT 'teams' AS table_name, COUNT(*) AS count FROM teams UNION ALL SELECT 'players', COUNT(*) FROM players UNION ALL SELECT 'games', COUNT(*) FROM games UNION ALL SELECT 'player_game_stats', COUNT(*) FROM player_game_stats UNION ALL SELECT 'team_game_stats', COUNT(*) FROM team_game_stats;" 2>/dev/null || echo "Database not running"
+	@docker compose exec db psql -U nba_user -d nba_db -c "SELECT 'teams' AS table_name, COUNT(*) AS count FROM teams UNION ALL SELECT 'players', COUNT(*) FROM players UNION ALL SELECT 'games', COUNT(*) FROM games UNION ALL SELECT 'player_game_stats', COUNT(*) FROM player_game_stats UNION ALL SELECT 'team_game_stats', COUNT(*) FROM team_game_stats UNION ALL SELECT 'shot_attempts', COUNT(*) FROM shot_attempts;" 2>/dev/null || echo "Database not running"

@@ -95,6 +95,17 @@ def test_detail_views_have_linkable_hash_routes() -> None:
     assert "window.addEventListener('hashchange', route)" in javascript
     for detail in ("team", "player", "game"):
         assert f'href="#{detail}/${{encodeURIComponent(' in javascript
+    assert "#shots/${encodeURIComponent(type)}" in javascript
+
+
+def test_shot_chart_is_accessible_and_uses_no_third_party_script() -> None:
+    html = TEMPLATE.read_text()
+    javascript = SCRIPT.read_text()
+
+    assert 'id="shot-chart-form"' in html
+    assert 'aria-live="polite"' in html
+    assert 'role="img" aria-label="Half-court shot chart"' in javascript
+    assert "https://" not in javascript
 
 
 def test_detail_dialogs_expose_accessible_names() -> None:

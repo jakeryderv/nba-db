@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 NBA Data Extract Script
-Downloads team, player, and game data from nba_api.
+Downloads team, player, game, and shot-location data from nba_api.
 
 Endpoints used:
 - teams.get_teams() - Static team data
 - CommonAllPlayers - All players
 - LeagueGameLog (Teams) - Games with scores, dates, team stats
 - LeagueGameLog (Players) - Player game stats
+- ShotChartDetail - League-wide shot attempts and court locations
 
 Usage:
     python extract.py                    # Default season (2024-25)
@@ -20,7 +21,7 @@ import os
 import re
 import time
 
-from nba_api.stats.endpoints import CommonAllPlayers, LeagueGameLog
+from nba_api.stats.endpoints import CommonAllPlayers, LeagueGameLog, ShotChartDetail
 from nba_api.stats.static import teams
 
 # Configuration
@@ -126,6 +127,68 @@ def download_league_game_log(season, force=False):
         time.sleep(REQUEST_DELAY)
 
 
+def download_shot_chart(season, force=False):
+    """Download every regular-season attempt through bounded per-team queries."""
+    print("\n=== ShotChartDetail ===")
+    season_dir = get_season_dir(season)
+    ensure_dir(season_dir)
+    filepath = os.path.join(season_dir, "shot_chart.json")
+
+    if os.path.exists(filepath) and not force:
+        print("  Skipping shots (exists)")
+        return
+
+    # A team_id=0 league query is silently capped at 102,400 rows. Team-sized
+    # responses remain comfortably below that limit, and each attempt belongs
+    # to exactly one team, so combining all 30 responses is complete and unique.
+    team_rows = sorted(teams.get_teams(), key=lambda team: team["id"])
+    combined_headers = None
+    combined_rows = []
+    for index, team in enumerate(team_rows, start=1):
+        team_id = int(team["id"])
+        print(f"  Fetching {team['abbreviation']} ({index}/{len(team_rows)})...")
+        response = ShotChartDetail(
+            team_id=team_id,
+            player_id=0,
+            context_measure_simple="FGA",
+            league_id="00",
+            season_nullable=season,
+            season_type_all_star=SEASON_TYPE,
+            timeout=120,
+        )
+        data = response.get_dict()
+        result_sets = data.get("resultSets", [])
+        if not result_sets:
+            raise RuntimeError(f"ShotChartDetail returned no result set for team {team_id}")
+        detail = result_sets[0]
+        headers = detail.get("headers", [])
+        rows = detail.get("rowSet", [])
+        if not headers or not rows:
+            raise RuntimeError(f"ShotChartDetail returned no attempts for team {team_id}")
+        if combined_headers is None:
+            combined_headers = headers
+        elif headers != combined_headers:
+            raise RuntimeError("ShotChartDetail headers changed between team responses")
+        team_id_index = headers.index("TEAM_ID")
+        if any(int(row[team_id_index]) != team_id for row in rows):
+            raise RuntimeError(f"ShotChartDetail mixed team IDs for team {team_id}")
+        combined_rows.extend(rows)
+        if index < len(team_rows):
+            time.sleep(REQUEST_DELAY)
+
+    output = {
+        "resultSets": [
+            {
+                "name": "Shot_Chart_Detail",
+                "headers": combined_headers,
+                "rowSet": combined_rows,
+            }
+        ]
+    }
+    save_json(output, filepath)
+    print(f"  Found {len(combined_rows)} shot attempts across {len(team_rows)} teams")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Download NBA data")
     parser.add_argument(
@@ -150,6 +213,7 @@ def main():
     download_teams(force=args.force)
     download_players(season, force=args.force)
     download_league_game_log(season, force=args.force)
+    download_shot_chart(season, force=args.force)
 
     print("\n" + "=" * 50)
     print("Extract complete!")

@@ -18,7 +18,11 @@ DOC_EXACT = {"LICENSE", "LICENSE.md"}
 FRONTEND_PREFIXES = ("app/static/", "app/templates/")
 FRONTEND_EXACT = {"tests/test_frontend_safety.py", "tests/test_browser.py"}
 LIFECYCLE_PREFIXES = ("etl/",)
-LIFECYCLE_EXACT = {"tests/test_season_lifecycle.py", "tests/test_etl_load.py"}
+LIFECYCLE_EXACT = {
+    "tests/test_season_lifecycle.py",
+    "tests/test_etl_load.py",
+    "tests/test_shot_pipeline.py",
+}
 
 
 def _normalize(path: str) -> str:

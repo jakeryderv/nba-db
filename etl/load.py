@@ -118,7 +118,27 @@ def migrate_legacy_game_ids(conn, official_game_ids):
             """,
             official_legacy,
         )
+        cur.executemany(
+            """
+            INSERT INTO shot_attempts (
+                game_id, event_id, player_id, team_id, season, period,
+                minutes_remaining, seconds_remaining, action_type, shot_type,
+                zone_basic, zone_area, zone_range, shot_distance, loc_x, loc_y,
+                shot_made
+            )
+            SELECT
+                %s, event_id, player_id, team_id, season, period,
+                minutes_remaining, seconds_remaining, action_type, shot_type,
+                zone_basic, zone_area, zone_range, shot_distance, loc_x, loc_y,
+                shot_made
+            FROM shot_attempts
+            WHERE game_id = %s
+            ON CONFLICT (game_id, event_id) DO NOTHING
+            """,
+            official_legacy,
+        )
         legacy_only = [(legacy,) for legacy, _official in mappings]
+        cur.executemany("DELETE FROM shot_attempts WHERE game_id = %s", legacy_only)
         cur.executemany("DELETE FROM player_game_stats WHERE game_id = %s", legacy_only)
         cur.executemany("DELETE FROM team_game_stats WHERE game_id = %s", legacy_only)
         cur.executemany("DELETE FROM games WHERE id = %s", legacy_only)

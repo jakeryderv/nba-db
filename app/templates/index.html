@@ -41,6 +41,12 @@
                 </a>
             </li>
             <li>
+                <a href="#shots" class="nav-link" data-section="shots">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M5 20V9a7 7 0 0 1 14 0v11M9 20v-4h6v4"/><circle cx="12" cy="8" r="2"/></svg>
+                    Shot Charts
+                </a>
+            </li>
+            <li>
                 <a href="#players" class="nav-link" data-section="players">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     Players
@@ -99,6 +105,69 @@
             </div>
             <div class="cards-grid" id="games-grid"></div>
             <div class="pagination" id="games-pagination"></div>
+        </section>
+
+        <!-- Shot Charts -->
+        <section id="shots" class="section">
+            <div class="section-header">
+                <div>
+                    <h2 class="section-title">Shot Charts</h2>
+                    <p class="section-description">Explore every verified field-goal attempt in the loaded season.</p>
+                </div>
+            </div>
+            <form class="shot-controls" id="shot-chart-form">
+                <div class="compare-field">
+                    <label for="shot-subject-type">Chart type</label>
+                    <select class="filter-select" id="shot-subject-type">
+                        <option value="player">Player</option>
+                        <option value="team">Team</option>
+                    </select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-subject">Subject</label>
+                    <select class="filter-select" id="shot-subject" required><option value="">Select a player</option></select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-compare-subject">Compare with</label>
+                    <select class="filter-select" id="shot-compare-subject"><option value="">No comparison</option></select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-opponent">Opponent</label>
+                    <select class="filter-select" id="shot-opponent"><option value="">All opponents</option></select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-period">Period</label>
+                    <select class="filter-select" id="shot-period">
+                        <option value="">All periods</option>
+                        <option value="1">1st</option><option value="2">2nd</option>
+                        <option value="3">3rd</option><option value="4">4th</option>
+                        <option value="5">Overtime</option>
+                    </select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-result">Result</label>
+                    <select class="filter-select" id="shot-result">
+                        <option value="">Makes and misses</option>
+                        <option value="true">Made</option><option value="false">Missed</option>
+                    </select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-type">Shot type</label>
+                    <select class="filter-select" id="shot-type">
+                        <option value="">2PT and 3PT</option>
+                        <option value="2PT Field Goal">2PT</option>
+                        <option value="3PT Field Goal">3PT</option>
+                    </select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-game">Game ID</label>
+                    <input class="filter-input" id="shot-game" inputmode="numeric" pattern="002[0-9]{7}" placeholder="All games">
+                </div>
+                <button class="primary-button" type="submit">Build chart</button>
+            </form>
+            <div id="shot-chart-result" aria-live="polite">
+                <div class="empty-message">Choose a player or team to build a shot chart.</div>
+            </div>
         </section>
 
         <!-- Players -->

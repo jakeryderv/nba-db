@@ -3,7 +3,7 @@
 NBA Data Transform Script
 Transforms raw JSON from nba_api into clean CSVs.
 
-Input: data/raw/{season}/league_game_log_*.json
+Input: data/raw/{season}/league_game_log_*.json and shot_chart.json
 Output: data/clean/{season}/*.csv
 
 Usage:
@@ -354,6 +354,64 @@ def transform_player_game_stats(season):
     save_csv(df, os.path.join(season_clean, "player_game_stats.csv"))
 
 
+def transform_shot_attempts(season):
+    """Transform ShotChartDetail into one normalized row per field-goal attempt."""
+    print("\n=== Shot Attempts ===")
+    season_raw = get_season_raw_dir(season)
+    season_clean = get_season_clean_dir(season)
+    ensure_dir(season_clean)
+
+    filepath = os.path.join(season_raw, "shot_chart.json")
+    if not os.path.exists(filepath):
+        print("  Skipping: shot_chart.json not found")
+        return
+
+    data = load_json(filepath)
+    df = resultset_to_df(data)
+    df = df.rename(
+        columns={
+            "GAME_ID": "game_id",
+            "GAME_EVENT_ID": "event_id",
+            "PLAYER_ID": "player_id",
+            "TEAM_ID": "team_id",
+            "PERIOD": "period",
+            "MINUTES_REMAINING": "minutes_remaining",
+            "SECONDS_REMAINING": "seconds_remaining",
+            "ACTION_TYPE": "action_type",
+            "SHOT_TYPE": "shot_type",
+            "SHOT_ZONE_BASIC": "zone_basic",
+            "SHOT_ZONE_AREA": "zone_area",
+            "SHOT_ZONE_RANGE": "zone_range",
+            "SHOT_DISTANCE": "shot_distance",
+            "LOC_X": "loc_x",
+            "LOC_Y": "loc_y",
+            "SHOT_MADE_FLAG": "shot_made",
+        }
+    )
+    df["season"] = season
+    df["shot_made"] = df["shot_made"] == 1
+    columns = [
+        "game_id",
+        "event_id",
+        "player_id",
+        "team_id",
+        "season",
+        "period",
+        "minutes_remaining",
+        "seconds_remaining",
+        "action_type",
+        "shot_type",
+        "zone_basic",
+        "zone_area",
+        "zone_range",
+        "shot_distance",
+        "loc_x",
+        "loc_y",
+        "shot_made",
+    ]
+    save_csv(df[columns], os.path.join(season_clean, "shot_attempts.csv"))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Transform NBA data")
     parser.add_argument(
@@ -375,6 +433,7 @@ def main():
     transform_games(season)
     transform_team_game_stats(season)
     transform_player_game_stats(season)
+    transform_shot_attempts(season)
 
     print("\n" + "=" * 50)
     print("Transform complete!")

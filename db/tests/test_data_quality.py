@@ -86,6 +86,13 @@ def test_team_game_stats_not_empty(conn):
     return TestResult("Team game stats not empty", passed, f"Found {count} team game stats")
 
 
+def test_shot_attempts_not_empty(conn):
+    """Shot attempts should be loaded for the active dataset."""
+    count = run_scalar(conn, "SELECT COUNT(*) FROM shot_attempts")
+    passed = count > 0
+    return TestResult("Shot attempts not empty", passed, f"Found {count} shot attempts")
+
+
 # =============================================================================
 # Referential Integrity Tests
 # =============================================================================
@@ -239,6 +246,47 @@ def test_shooting_percentages_valid(conn):
     )
 
 
+def test_shot_totals_match_player_game_stats(conn):
+    """Shot detail must reconcile to each player-game FG and 3PT total."""
+    mismatches = run_scalar(
+        conn,
+        """
+        WITH shot_totals AS (
+            SELECT
+                game_id,
+                player_id,
+                MIN(team_id) AS team_id,
+                COUNT(*) AS fga,
+                COUNT(*) FILTER (WHERE shot_made) AS fgm,
+                COUNT(*) FILTER (WHERE shot_type = '3PT Field Goal') AS fg3a,
+                COUNT(*) FILTER (
+                    WHERE shot_type = '3PT Field Goal' AND shot_made
+                ) AS fg3m
+            FROM shot_attempts
+            GROUP BY game_id, player_id
+        )
+        SELECT COUNT(*)
+        FROM player_game_stats pgs
+        FULL OUTER JOIN shot_totals shots
+          ON shots.game_id = pgs.game_id AND shots.player_id = pgs.player_id
+        WHERE pgs.game_id IS NULL
+           OR (shots.game_id IS NOT NULL AND pgs.team_id IS DISTINCT FROM shots.team_id)
+           OR ABS(pgs.fga - COALESCE(shots.fga, 0)) > 1
+           OR pgs.fgm IS DISTINCT FROM COALESCE(shots.fgm, 0)
+           OR ABS(pgs.fg3a - COALESCE(shots.fg3a, 0)) > 1
+           OR pgs.fg3m IS DISTINCT FROM COALESCE(shots.fg3m, 0)
+        """,
+    )
+    passed = mismatches == 0
+    return TestResult(
+        "Shot totals satisfy player game stats correction policy",
+        passed,
+        f"Found {mismatches} player-game mismatches"
+        if mismatches
+        else "All shot totals satisfy the correction policy",
+    )
+
+
 # =============================================================================
 # Completeness Tests
 # =============================================================================
@@ -312,6 +360,7 @@ def run_all_tests():
         test_games_not_empty,
         test_player_game_stats_not_empty,
         test_team_game_stats_not_empty,
+        test_shot_attempts_not_empty,
         # Referential integrity tests
         test_games_reference_valid_teams,
         test_player_stats_reference_valid_players,
@@ -321,6 +370,7 @@ def run_all_tests():
         test_two_teams_per_game,
         test_player_stats_reasonable_values,
         test_shooting_percentages_valid,
+        test_shot_totals_match_player_game_stats,
         # Completeness tests
         test_active_players_have_stats,
         test_all_teams_have_games,

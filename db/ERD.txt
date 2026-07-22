@@ -76,6 +76,23 @@ TABLES
 +------------------------------------------+
 |            team_game_stats               |
 +------------------------------------------+
+
++------------------------------------------+
+|              shot_attempts               |
++------------------------------------------+
+| PK/FK game_id         VARCHAR(20)        |
+| PK    event_id       INTEGER            |
+| FK    player_id      BIGINT             |
+| FK    team_id        BIGINT             |
+|       season         VARCHAR(10)        |
+|       period, clock  INTEGER            |
+|       action_type    VARCHAR(100)       |
+|       shot_type      VARCHAR(20)        |
+|       zone_*         VARCHAR(50)        |
+|       shot_distance  INTEGER            |
+|       loc_x, loc_y   INTEGER            |
+|       shot_made      BOOLEAN            |
++------------------------------------------+
 | PK id                 INT AUTO_INCREMENT |
 | FK game_id            VARCHAR(20)        |
 | FK team_id            BIGINT             |
@@ -127,6 +144,9 @@ RELATIONSHIPS
 
   games (1) ----< (M) team_game_stats        One game has exactly 2 team stats
   games (1) ----< (M) player_game_stats      One game has many player stats
+  games (1) ----< (M) shot_attempts          One game has many shot attempts
+  players (1) --< (M) shot_attempts          One player has many shot attempts
+  teams (1) ----< (M) shot_attempts          One team has many shot attempts
 
 
 CONSTRAINTS
@@ -140,6 +160,7 @@ CONSTRAINTS
   games.id                VARCHAR(20)    NBA game ID
   team_game_stats.id      INT            Auto-increment
   player_game_stats.id    INT            Auto-increment
+  shot_attempts            (game_id, event_id)
 
   Foreign Keys:
   -------------
@@ -150,12 +171,16 @@ CONSTRAINTS
   player_game_stats.game_id   -> games.id
   player_game_stats.player_id -> players.id
   player_game_stats.team_id   -> teams.id
+  shot_attempts.game_id       -> games.id
+  shot_attempts.player_id     -> players.id
+  shot_attempts.team_id       -> teams.id
 
   Unique Constraints:
   -------------------
   teams.abbreviation                      3-letter team code
   team_game_stats (game_id, team_id)      One stat record per team per game
   player_game_stats (game_id, player_id)  One stat record per player per game
+  shot_attempts (game_id, event_id)        One record per official game event
 
   Check Constraints:
   ------------------
@@ -177,6 +202,10 @@ CONSTRAINTS
     - start_year >= 1946
     - end_year = start_year + 1
     - games_count >= 0, players_count >= 0
+
+  shot_attempts:
+    - valid period, clock, distance, and coordinate ranges
+    - shot_type is a 2PT or 3PT field goal
 
 
 INDEXES
@@ -200,6 +229,9 @@ INDEXES
   Table: players
     - idx_players_active (is_active)
 
+  Table: shot_attempts
+    - season, game, player+season, team+season, and zone indexes
+
 
 NORMALIZATION (3NF)
 ================================================================================
@@ -221,7 +253,7 @@ NORMALIZATION (3NF)
     - Player details only in players table (not repeated in stats)
 
   Intentional Denormalization:
-    - 'season' column exists in games, team_game_stats, and player_game_stats
+    - 'season' column exists in games, team_game_stats, player_game_stats, and shot_attempts
     - Rationale: Avoids expensive joins when filtering by season
 
 
@@ -236,5 +268,6 @@ CARDINALITY
   games               | ~1,230         | 82 games x 30 teams / 2
   team_game_stats     | ~2,460         | 2 records per game
   player_game_stats   | ~30,000        | ~13 players x 2 teams x 1,230 games
+  shot_attempts       | ~200,000       | One row per field-goal attempt
 
 ================================================================================

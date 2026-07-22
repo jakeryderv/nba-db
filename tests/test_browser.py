@@ -178,3 +178,20 @@ def test_compare_teams_shows_head_to_head(page: Page, live_url: str) -> None:
     expect(result.get_by_role("heading", name="Boston Celtics")).to_be_visible()
     expect(result.get_by_role("heading", name="Head-to-head")).to_be_visible()
     expect(result.get_by_text("10 games", exact=False)).to_be_visible()
+
+
+def test_shot_chart_supports_filters_and_player_overlay(page: Page, live_url: str) -> None:
+    page.goto(f"{live_url}/#shots")
+    page.locator("#shot-subject").select_option(str(LEBRON))
+    page.locator("#shot-compare-subject").select_option(str(TATUM))
+    page.locator("#shot-result").select_option("true")
+    page.get_by_role("button", name="Build chart").click()
+
+    expect(page).to_have_url(re.compile(rf"#shots/player/{LEBRON}/{TATUM}$"))
+    result = page.locator("#shot-chart-result")
+    expect(result.get_by_role("heading", name="LeBron James")).to_be_visible()
+    expect(result.get_by_role("heading", name="Jayson Tatum")).to_be_visible()
+    expect(result.get_by_role("img", name="Half-court shot chart")).to_be_visible()
+    expect(result.locator(".shot-marker.shot-series-1.made")).to_have_count(120)
+    expect(result.locator(".shot-marker.shot-series-2.made")).to_have_count(45)
+    expect(result.locator(".shot-marker.missed")).to_have_count(0)

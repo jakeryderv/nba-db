@@ -77,6 +77,42 @@ def _seed(conn: psycopg.Connection) -> None:
                 " VALUES (%s, %s, %s, %s, 36.5, 30, 8, 9, 12, 20, 2, 6, 4, 5)",
                 (game_id, LEBRON, LAKERS, SEED_SEASON),
             )
+            lebron_shots = []
+            for shot in range(1, 21):
+                is_three = shot <= 6
+                made = shot <= 2 or 7 <= shot <= 16
+                lebron_shots.append(
+                    (
+                        game_id,
+                        shot,
+                        LEBRON,
+                        LAKERS,
+                        SEED_SEASON,
+                        1 + (shot - 1) // 5,
+                        11 - ((shot - 1) % 5),
+                        (shot * 7) % 60,
+                        "Jump Shot" if is_three else "Driving Layup Shot",
+                        "3PT Field Goal" if is_three else "2PT Field Goal",
+                        "Above the Break 3" if is_three else "Restricted Area",
+                        "Center(C)",
+                        "24+ ft." if is_three else "Less Than 8 ft.",
+                        25 if is_three else 2,
+                        (shot - 10) * 12,
+                        230 if is_three else 15 + shot,
+                        made,
+                    )
+                )
+            cur.executemany(
+                """
+                INSERT INTO shot_attempts (
+                    game_id, event_id, player_id, team_id, season, period,
+                    minutes_remaining, seconds_remaining, action_type, shot_type,
+                    zone_basic, zone_area, zone_range, shot_distance, loc_x, loc_y,
+                    shot_made
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                lebron_shots,
+            )
             # Tatum plays only games 1-5: below the leaders threshold.
             if i <= 5:
                 cur.execute(
@@ -84,6 +120,42 @@ def _seed(conn: psycopg.Connection) -> None:
                     " points, rebounds, assists, fgm, fga, fg3m, fg3a, ftm, fta)"
                     " VALUES (%s, %s, %s, %s, 34.0, 25, 7, 4, 9, 19, 3, 8, 4, 4)",
                     (game_id, TATUM, CELTICS, SEED_SEASON),
+                )
+                tatum_shots = []
+                for shot in range(1, 20):
+                    is_three = shot <= 8
+                    made = shot <= 3 or 9 <= shot <= 14
+                    tatum_shots.append(
+                        (
+                            game_id,
+                            100 + shot,
+                            TATUM,
+                            CELTICS,
+                            SEED_SEASON,
+                            1 + (shot - 1) // 5,
+                            11 - ((shot - 1) % 5),
+                            (shot * 9) % 60,
+                            "Pullup Jump Shot",
+                            "3PT Field Goal" if is_three else "2PT Field Goal",
+                            "Above the Break 3" if is_three else "Mid-Range",
+                            "Right Side(R)" if is_three else "Center(C)",
+                            "24+ ft." if is_three else "8-16 ft.",
+                            26 if is_three else 14,
+                            100 - shot * 6,
+                            245 if is_three else 120 + shot,
+                            made,
+                        )
+                    )
+                cur.executemany(
+                    """
+                    INSERT INTO shot_attempts (
+                        game_id, event_id, player_id, team_id, season, period,
+                        minutes_remaining, seconds_remaining, action_type, shot_type,
+                        zone_basic, zone_area, zone_range, shot_distance, loc_x, loc_y,
+                        shot_made
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    tatum_shots,
                 )
             # A DNP row must not count as an appearance or affect averages/leaders.
             if i == 10:

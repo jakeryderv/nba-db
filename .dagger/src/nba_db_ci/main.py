@@ -169,6 +169,7 @@ class NbaDbCi:
                     "pytest",
                     "tests/test_season_lifecycle.py",
                     "tests/test_etl_load.py",
+                    "tests/test_shot_pipeline.py",
                     "-v",
                 ]
             )
