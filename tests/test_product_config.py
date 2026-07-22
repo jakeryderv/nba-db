@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 from nba_config import DEFAULT_SEASON
@@ -38,3 +39,18 @@ def test_direct_legacy_loader_is_disabled() -> None:
 
     assert result.returncode != 0
     assert "Direct loading is disabled" in result.stderr
+
+
+def test_production_dependencies_exclude_etl_and_development_tooling() -> None:
+    configuration = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+    runtime = "\n".join(configuration["project"]["dependencies"])
+    development = "\n".join(configuration["dependency-groups"]["dev"])
+    start_command = tomllib.loads((PROJECT_ROOT / "railway.toml").read_text())["deploy"][
+        "startCommand"
+    ]
+
+    for package in ("nba-api", "numpy", "pandas", "ruff", "mypy", "playwright"):
+        assert package not in runtime
+    for package in ("nba-api", "numpy", "pandas", "ruff", "mypy", "playwright"):
+        assert package in development
+    assert start_command.count("uv run --no-sync") == 2

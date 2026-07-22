@@ -40,5 +40,14 @@
         return response.json();
     }
 
-    globalThis.NbaCore = Object.freeze({h, present, pct, showStatus, showLoading, showError, api});
+    function trackUsage(event, view) {
+        fetch('/api/telemetry', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({event, view}),
+            keepalive: true
+        }).catch(() => {});
+    }
+
+    globalThis.NbaCore = Object.freeze({h, present, pct, showStatus, showLoading, showError, api, trackUsage});
 }());

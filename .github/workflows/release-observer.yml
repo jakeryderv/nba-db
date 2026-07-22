@@ -1,0 +1,117 @@
+name: Production Release Observer
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-release-observer
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: >-
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        if: github.event.workflow_run.conclusion == 'success'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v7
+        if: github.event.workflow_run.conclusion == 'success'
+        with:
+          enable-cache: true
+
+      - name: Wait for the verified revision to become live
+        id: release
+        if: github.event.workflow_run.conclusion == 'success'
+        continue-on-error: true
+        env:
+          LIVE_API_URL: ${{ vars.LIVE_API_URL }}
+          EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: >-
+          uv run --locked --no-dev --extra monitor python scripts/check_release.py
+          --api-url "$LIVE_API_URL"
+          --expected-revision "$EXPECTED_REVISION"
+          --attempts 60
+          --interval-seconds 10
+
+      - name: Verify the deployed product contract
+        id: live
+        if: steps.release.outcome == 'success'
+        continue-on-error: true
+        env:
+          LIVE_API_URL: ${{ vars.LIVE_API_URL }}
+          EXPECTED_GAMES: "1230"
+          EXPECTED_PLAYERS: "582"
+          EXPECTED_SHOT_ATTEMPTS: "219160"
+          MAX_RESPONSE_MS: "3000"
+        run: uv run --locked --no-dev --extra monitor python scripts/check_live.py
+
+      - name: Determine release state
+        id: state
+        if: always()
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RELEASE_OUTCOME: ${{ steps.release.outcome }}
+          LIVE_OUTCOME: ${{ steps.live.outcome }}
+        run: |
+          healthy=false
+          reason="CI concluded $CI_CONCLUSION"
+          if [ "$CI_CONCLUSION" = "success" ] && [ "$RELEASE_OUTCOME" = "success" ] && [ "$LIVE_OUTCOME" = "success" ]; then
+            healthy=true
+            reason="CI, Railway release revision, and live product contract passed"
+          elif [ "$CI_CONCLUSION" = "success" ] && [ "$RELEASE_OUTCOME" != "success" ]; then
+            reason="Railway did not serve the expected revision within ten minutes"
+          elif [ "$CI_CONCLUSION" = "success" ]; then
+            reason="The deployed product contract failed"
+          fi
+          echo "healthy=$healthy" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+      - name: Close resolved production alert
+        if: steps.state.outputs.healthy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create production-alert --color D73A4A \
+            --description "Automated production operations require attention" --force
+          issue_number="$(gh issue list --state open --label production-alert \
+            --search 'Production release requires attention in:title' --json number --jq '.[0].number // empty')"
+          if [ -n "$issue_number" ]; then
+            gh issue close "$issue_number" --comment "Resolved by successful release verification $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+
+      - name: Open production alert
+        if: steps.state.outputs.healthy != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ steps.state.outputs.reason }}
+        run: |
+          gh label create production-alert --color D73A4A \
+            --description "Automated production operations require attention" --force
+          issue_number="$(gh issue list --state open --label production-alert \
+            --search 'Production release requires attention in:title' --json number --jq '.[0].number // empty')"
+          source_url="${{ github.event.workflow_run.html_url }}"
+          if [ -n "$issue_number" ]; then
+            gh issue comment "$issue_number" --body "$REASON. Source run: $source_url"
+          else
+            gh issue create --title "Production release requires attention" \
+              --label production-alert \
+              --body "$REASON. Source run: $source_url"
+          fi
+
+      - name: Fail unhealthy release observation
+        if: steps.state.outputs.healthy != 'true'
+        run: exit 1

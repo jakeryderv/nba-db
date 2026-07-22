@@ -38,6 +38,11 @@
             justify-content: space-between;
             align-items: center;
         }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
         .logo {
             display: flex;
             align-items: center;
@@ -87,6 +92,32 @@
         .dataset-status.verified {
             background: var(--accent-green);
             box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+        }
+        .share-view {
+            padding: 0.55rem 0.8rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            color: var(--text);
+            font: inherit;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .share-view:hover, .share-view:focus-visible {
+            border-color: var(--accent);
+            color: var(--accent-light);
+        }
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
         }
 
         /* Navigation */
@@ -961,6 +992,10 @@
             .header-content {
                 flex-direction: column;
                 gap: 0.75rem;
+            }
+            .header-actions {
+                width: 100%;
+                justify-content: space-between;
             }
             .section-header {
                 flex-direction: column;

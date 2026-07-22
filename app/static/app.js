@@ -1,5 +1,6 @@
-const {h, present, pct, showStatus, showLoading, showError, api} = globalThis.NbaCore;
+const {h, present, pct, showStatus, showLoading, showError, api, trackUsage} = globalThis.NbaCore;
 let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotActionTypes = [], ready = false, activeSection = 'standings', shotGamesRequest = 0;
+        let lastTrackedRoute = null;
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
         const sections = new Set(['standings', 'leaders', 'games', 'shots', 'players', 'compare']);
 
@@ -20,14 +21,17 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotAct
             document.getElementById('shot-subject').onchange = () => populateShotGames('');
             document.getElementById('shot-chart-form').onsubmit = event => {
                 event.preventDefault();
+                trackUsage('shot_chart', 'shots');
                 navigateShotChart();
             };
             document.getElementById('player-compare-form').onsubmit = event => {
                 event.preventDefault();
+                trackUsage('compare', 'compare');
                 navigateComparison('players');
             };
             document.getElementById('team-compare-form').onsubmit = event => {
                 event.preventDefault();
+                trackUsage('compare', 'compare');
                 navigateComparison('teams');
             };
 
@@ -51,7 +55,9 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotAct
                 const actions = {
                     paginate: () => paginate(target.dataset.key, Number(target.dataset.direction)),
                     'compare-tab': () => showCompareType(target.dataset.compareType),
-                    'close-modal': () => closeDetail()
+                    'close-modal': () => closeDetail(),
+                    'copy-view': () => copyCurrentView(target),
+                    'track-export': () => trackUsage('export', 'shots')
                 };
                 actions[target.dataset.action]?.();
             });
@@ -111,6 +117,14 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotAct
         async function route() {
             if (!ready) return;
             const {kind, parts, filters} = parseRoute();
+            const routeKey = window.location.hash || '#standings';
+            if (routeKey !== lastTrackedRoute) {
+                const view = sections.has(kind) || ['player', 'game', 'team'].includes(kind)
+                    ? kind
+                    : activeSection;
+                trackUsage('view', view);
+                lastTrackedRoute = routeKey;
+            }
             const id = parts[0] || null;
             if (kind === 'compare' && parts.length === 3 && ['players', 'teams'].includes(parts[0])) {
                 activeSection = 'compare';
@@ -143,6 +157,21 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotAct
             }
             history.replaceState(null, '', `#${activeSection}`);
             route();
+        }
+
+        async function copyCurrentView(button) {
+            const original = button.textContent;
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                button.textContent = 'Link copied';
+                document.getElementById('share-status').textContent = 'Current view link copied';
+                trackUsage('share', activeSection);
+                window.setTimeout(() => { button.textContent = original; }, 2000);
+            } catch (_error) {
+                document.getElementById('share-status').textContent = 'Unable to copy the current link';
+                button.textContent = 'Copy failed';
+                window.setTimeout(() => { button.textContent = original; }, 2000);
+            }
         }
 
         function switchTo(s, load = true) {
@@ -387,7 +416,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotAct
                 const names = ids.map(value => subjectName(type, value));
                 result.innerHTML = `
                     <div class="shot-actions">${ids.map((value, index) => `
-                        <a class="secondary-button" href="${h(shotExportUrl(type, value))}" download>Download ${h(names[index])} CSV</a>
+                        <a class="secondary-button" href="${h(shotExportUrl(type, value))}" download data-action="track-export">Download ${h(names[index])} CSV</a>
                     `).join('')}</div>
                     <div class="shot-summary-grid">${charts.map((chart, index) => `
                         <div class="shot-summary shot-series-${index + 1}">

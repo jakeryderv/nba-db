@@ -37,6 +37,25 @@ def test_request_ids_are_propagated_or_safely_replaced(client):
     unsafe = client.get("/health", headers={"X-Request-ID": "bad id with spaces"})
     assert unsafe.headers["x-request-id"] != "bad id with spaces"
     assert len(unsafe.headers["x-request-id"]) == 32
+    assert supplied.headers["x-release-revision"] == "development"
+
+
+def test_anonymous_usage_events_are_allowlisted_and_logged(client, caplog):
+    with caplog.at_level("INFO", logger="app.main"):
+        response = client.post(
+            "/api/telemetry",
+            json={"event": "share", "view": "shots"},
+        )
+
+    assert response.status_code == 204
+    assert "Usage event=share view=shots" in caplog.text
+    assert (
+        client.post(
+            "/api/telemetry",
+            json={"event": "user_identifier", "view": "shots"},
+        ).status_code
+        == 422
+    )
 
 
 def test_readiness_requires_the_verified_complete_default_dataset(client, monkeypatch):

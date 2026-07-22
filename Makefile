@@ -192,7 +192,7 @@ seasons:
 
 # Testing & Quality
 test:
-	PYTHONPATH=. uv run pytest tests/ -v
+	PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/ -v
 
 test-data:
 	PYTHONPATH=. uv run python db/tests/test_data_quality.py

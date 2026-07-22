@@ -40,6 +40,7 @@ def test_assets_are_external_and_compatible_with_strict_csp() -> None:
     assert '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in html
     assert '<script src="/static/app.js" defer></script>' in html
     assert '<script src="/static/core.js" defer></script>' in html
+    assert "Copy view link" in html
     assert "<style" not in html
     assert not re.search(r"<script(?!\s+src=)", html)
     assert not re.search(r"\sstyle\s*=", html, re.IGNORECASE)

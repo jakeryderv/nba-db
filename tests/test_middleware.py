@@ -43,3 +43,21 @@ def test_request_policy_returns_bounded_429(monkeypatch) -> None:
     assert limited.headers["retry-after"]
     assert limited.headers["x-request-id"]
     assert limited.json() == {"detail": "Rate limit exceeded; retry later"}
+
+
+def test_telemetry_posts_share_the_bounded_api_budget(monkeypatch) -> None:
+    from app.middleware import RequestPolicyMiddleware
+
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1")
+    application = FastAPI()
+    application.add_middleware(RequestPolicyMiddleware)
+
+    @application.post("/api/telemetry", status_code=204)
+    def telemetry() -> None:
+        return None
+
+    with TestClient(application) as client:
+        assert client.post("/api/telemetry").status_code == 204
+        limited = client.post("/api/telemetry")
+
+    assert limited.status_code == 429
