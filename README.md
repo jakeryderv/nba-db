@@ -19,7 +19,7 @@ A read-only web app and REST API for exploring NBA statistics — standings, sta
 | Web framework | FastAPI + psycopg 3 |
 | Package manager | uv |
 | Data source | [nba_api](https://github.com/swar/nba_api) |
-| CI | GitHub Actions (ruff, mypy, pytest) |
+| Automation | Dagger (local and CI), pre-commit, GitHub Actions |
 
 ## API
 
@@ -54,10 +54,11 @@ curl "https://nba-api-production-0cd7.up.railway.app/api/leaders/points?season=2
 
 ## Local development
 
-Prerequisites: Docker, Python 3.11+, [uv](https://github.com/astral-sh/uv).
+Prerequisites: Docker, Python 3.11+, [uv](https://github.com/astral-sh/uv), and [Dagger](https://docs.dagger.io/getting-started/installation/) 0.21.7.
 
 ```bash
 make install       # uv sync
+make hooks-install # selective pre-commit and pre-push hooks
 cp .env.example .env
 make db-start      # PostgreSQL in Docker
 make season-build SEASON=2025-26
@@ -66,6 +67,26 @@ make api           # http://localhost:8000
 ```
 
 Every data command requires an explicit season. There is no default season or default multi-season backfill. Run `make help` for the complete target list.
+
+For a disposable environment with an empty schema, run `dagger up dev`. Dagger starts both PostgreSQL and the API, and exposes the API on port 8000 without using the host database.
+
+## Local-first automation
+
+Dagger defines the authoritative portable checks and isolated services. The same pipeline runs locally and in GitHub Actions:
+
+```bash
+dagger check                 # all functions marked as Dagger checks
+dagger call full --source=.  # the explicit complete merge gate
+make dagger-check            # convenience alias for the complete gate
+```
+
+The local hooks are intentionally tiered:
+
+- Pre-commit runs generic file hygiene, Ruff on staged Python files, and Markdown checks only when those file types are staged.
+- Pre-push compares committed changes with `origin/main`. Documentation-only, frontend-only, and ETL/lifecycle-only changes get focused Dagger checks; mixed, unknown, backend, schema, dependency, Dagger, and CI changes get the full pipeline.
+- GitHub pull requests use the same conservative classifier inside one stable required job. Pushes to `main`, nightly runs, and manual runs always execute the full pipeline. Nightly/manual runs also audit dependencies.
+
+Hooks are fast developer feedback and can be bypassed with `--no-verify`; GitHub Actions remains the trusted merge gate. If a pre-push comparison cannot be calculated, it fails safe to the full pipeline. Install both hooks with `make hooks-install`, run lightweight hooks manually with `make hooks-run`, or invoke the affected pre-push gate with `make pre-push`.
 
 ## Safe season lifecycle
 
@@ -81,6 +102,24 @@ uv run python -m json.tool data/clean/2025-26/manifest.json
 uv run python -m json.tool data/clean/2025-26/verification.json
 ```
 
+The equivalent trusted-machine Dagger build requires an explicit freshness key so a changing external NBA response cannot be confused with a deterministic cached input. It returns a typed directory that must be deliberately exported to the host:
+
+```bash
+dagger call season-build \
+  --season=2025-26 \
+  --refresh-key=2026-07-22T010000Z \
+  export --path=data
+```
+
+To build, load, and serve the season entirely in disposable Dagger services, use a unique operation ID and leave the command running:
+
+```bash
+dagger up local-refresh \
+  --season=2025-26 \
+  --refresh-key=2026-07-22T010000Z \
+  --operation-id=local-refresh-2026-07-22T010000Z
+```
+
 To rerun only the network-backed cross-check after transformation, use `make verify-official SEASON=2025-26`. Do not edit transformed files after verification or manifest creation. The report records every transformed-file checksum, and local load and production promotion fail closed if the dataset, report, or manifest changed. This check validates season totals; the existing relational and API tests still cover per-game calculations and application behavior.
 
 ### 2. Replace the local database
@@ -92,6 +131,18 @@ make db-start
 unset DATABASE_URL PRODUCTION_DATABASE_URL
 make season-load-local SEASON=2025-26
 ```
+
+After exporting a Dagger season build, the persistent Docker Compose database can instead be loaded through an explicitly granted host-service tunnel:
+
+```bash
+dagger call local-load \
+  --database=tcp://localhost:5432 \
+  --season=2025-26 \
+  --confirm-local-target='LOCAL DOCKER DATABASE' \
+  --operation-id=local-load-2026-07-22T010000Z
+```
+
+`local-load` has no network extraction step. It verifies the exported manifest again and uses the same exact one-season replacement logic as the Make workflow. The required operation ID prevents a mutating execution layer from being reused accidentally.
 
 This is an exact one-season replacement: all other local season rows are removed inside the replacement transaction. Verify the local API and data before considering production promotion. There is no raw load or multi-season Make target. `refresh` exists only as a compatibility alias for the same guarded build and localhost replacement; it is not a production promotion path.
 
@@ -119,6 +170,23 @@ make season-promote \
 unset PRODUCTION_DATABASE_URL
 ```
 
+Dagger also exposes the same guarded promotion and returns the backup as a typed file. The database URL is introduced as a Dagger secret, while the data directory and backup destination remain explicit host grants:
+
+```bash
+dagger call promote \
+  --season=2025-26 \
+  --confirm-season=2025-26 \
+  --confirm-single-season='DELETE OTHER SEASONS' \
+  --api-url=https://nba-api-production-0cd7.up.railway.app \
+  --backup-name=nba-db-before-2025-26-20260722T010000Z.dump \
+  --operation-id=production-2025-26-20260722T010000Z \
+  --production-database-url=env:PRODUCTION_DATABASE_URL \
+  export --path="$HOME/.local/share/nba-db/backups/nba-db-before-2025-26-20260722T010000Z.dump"
+unset PRODUCTION_DATABASE_URL
+```
+
+The typed confirmations remain enforced inside the lifecycle command. Neither GitHub Actions nor Railway receives `PRODUCTION_DATABASE_URL`, calls `stats.nba.com`, or invokes these mutating functions.
+
 Promotion verifies the manifest again, rejects local database targets, and takes a database advisory lock held from the protected custom-format `pg_dump` through the final live smoke check. It atomically replaces production so it contains exactly the confirmed season, then checks live health, season metadata, game identity/count, a sampled box score, standings, and points leaders against the manifest and promoted season. The API smoke check retries briefly; if it ultimately fails, the database replacement has already committed, so investigate immediately and restore the backup if the promoted data is not acceptable.
 
 ### Backup restore guidance
@@ -130,7 +198,8 @@ Keep the reported backup path and restrict access to it. First inspect the archi
 ```bash
 make test        # API test suite (pytest; needs make db-start, uses a separate nba_db_test database)
 make test-data   # data quality checks against loaded data
-make check       # ruff + mypy
+make check       # native formatting + ruff + docs + mypy
+make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 ```
 
 `make test` also runs the primary dashboard journeys in a headless Chromium browser. Install the browser once on a new workstation with `uv run playwright install chromium`; the test suite falls back to a locally installed Chrome when available.
@@ -146,7 +215,7 @@ make check       # ruff + mypy
 
 ## Deployment
 
-Deployed on [Railway](https://railway.com) (`railway.toml`): on each deploy, `scripts/init_db.py` applies pending checksum-tracked schema migrations and refreshes the read-only role, then uvicorn serves the app. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and `READONLY_DB_PASSWORD` on the service.
+Deployed on [Railway](https://railway.com) (`railway.toml`) after the required GitHub check succeeds: Railpack builds the application, `scripts/init_db.py` applies pending checksum-tracked schema migrations and refreshes the read-only role, then uvicorn serves the app. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and `READONLY_DB_PASSWORD` on the service. Railway deployment remains separate from Dagger so production credentials stay out of GitHub-hosted runners.
 
 Schema migration files are immutable after they have been applied. To change the database, add the next numbered file under `db/schema/`; editing an applied file causes initialization to fail with a checksum error.
 
