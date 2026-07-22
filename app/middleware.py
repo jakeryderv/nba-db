@@ -14,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "

@@ -52,7 +52,7 @@ from app.models import (
 from app.shot_filters import HomeAway, ShotType, shot_query_parts
 from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager

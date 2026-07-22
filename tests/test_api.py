@@ -41,7 +41,7 @@ def test_request_ids_are_propagated_or_safely_replaced(client):
 
 
 def test_anonymous_usage_events_are_allowlisted_and_logged(client, caplog):
-    with caplog.at_level("INFO", logger="app.main"):
+    with caplog.at_level("INFO", logger="uvicorn.error"):
         response = client.post(
             "/api/telemetry",
             json={"event": "share", "view": "shots"},
