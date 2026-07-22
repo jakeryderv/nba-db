@@ -47,6 +47,7 @@ from app.models import (
     TeamPlayerSummaryList,
     TeamSeasonSummary,
     TeamStanding,
+    UsageEvent,
 )
 from app.shot_filters import HomeAway, ShotType, shot_query_parts
 from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
@@ -206,6 +207,13 @@ def get_dataset_status(
             manifest_sha256=(row["manifest_sha256"].strip() if row["manifest_sha256"] else None),
             counts=DatasetCounts(**{key: row[key] for key in count_keys}),
         )
+
+
+@app.post("/api/telemetry", status_code=204, tags=["Operations"])
+def record_usage(event: UsageEvent) -> Response:
+    """Record an anonymous, allowlisted product event in structured service logs."""
+    logger.info("Usage event=%s view=%s", event.event, event.view)
+    return Response(status_code=204)
 
 
 # === Teams ===

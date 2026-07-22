@@ -114,6 +114,19 @@ def test_standings_open_team_dashboard(page: Page, live_url: str) -> None:
     expect(page).to_have_url(re.compile(r"#standings$"))
 
 
+def test_current_view_can_be_copied_and_reports_an_accessible_status(
+    page: Page, live_url: str
+) -> None:
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=live_url)
+    page.goto(f"{live_url}/#leaders")
+
+    page.get_by_role("button", name="Copy view link").click()
+
+    expect(page.get_by_role("button", name="Link copied")).to_be_visible()
+    expect(page.locator("#share-status")).to_have_text("Current view link copied")
+    assert page.evaluate("navigator.clipboard.readText()") == f"{live_url}/#leaders"
+
+
 def test_leader_opens_player_profile_and_game_log(page: Page, live_url: str) -> None:
     page.goto(f"{live_url}/#leaders")
     page.get_by_role("link", name="LeBron James", exact=True).click()

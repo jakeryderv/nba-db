@@ -1,6 +1,7 @@
 """Pydantic models for API responses."""
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -52,6 +53,15 @@ class DatasetStatus(BaseModel):
     verification_status: str
     manifest_sha256: str | None = None
     counts: DatasetCounts
+
+
+class UsageEvent(BaseModel):
+    """Allowlisted, anonymous product-usage signal."""
+
+    event: Literal["view", "share", "export", "compare", "shot_chart"]
+    view: Literal[
+        "standings", "leaders", "games", "shots", "players", "compare", "player", "game", "team"
+    ]
 
 
 # === Game Models ===

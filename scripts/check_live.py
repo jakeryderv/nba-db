@@ -49,6 +49,7 @@ def check_live(
 
     responses: dict[str, Any] = {}
     timings_ms: dict[str, float] = {}
+    release_revision: str | None = None
     for name, path, params in (
         ("health", "/health", None),
         ("ready", "/ready", None),
@@ -72,9 +73,19 @@ def check_live(
         headers = getattr(response, "headers", None)
         if headers is not None:
             normalized = {str(key).lower(): value for key, value in headers.items()}
-            for required_header in ("x-request-id", "x-response-time-ms", "x-content-type-options"):
+            for required_header in (
+                "x-request-id",
+                "x-response-time-ms",
+                "x-content-type-options",
+                "x-release-revision",
+            ):
                 if required_header not in normalized:
                     raise LiveCheckError(f"{name} response is missing {required_header}")
+            response_revision = str(normalized["x-release-revision"])
+            if release_revision is None:
+                release_revision = response_revision
+            elif response_revision != release_revision:
+                raise LiveCheckError("Live responses came from inconsistent release revisions")
 
     if responses["health"] != {"status": "healthy", "database": "connected"}:
         raise LiveCheckError("Health response is not healthy")
@@ -120,6 +131,7 @@ def check_live(
         "season": season,
         "counts": dataset["counts"],
         "manifest_sha256": dataset.get("manifest_sha256"),
+        "release_revision": release_revision,
         "timings_ms": {key: round(value, 1) for key, value in timings_ms.items()},
     }
 

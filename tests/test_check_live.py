@@ -15,6 +15,7 @@ class FakeResponse:
             "X-Request-ID": "test-request",
             "X-Response-Time-Ms": "1.0",
             "X-Content-Type-Options": "nosniff",
+            "X-Release-Revision": "abc1234",
         }
 
     def raise_for_status(self) -> None:

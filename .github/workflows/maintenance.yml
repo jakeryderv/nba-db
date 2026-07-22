@@ -1,0 +1,161 @@
+name: Production Maintenance
+
+on:
+  schedule:
+    - cron: "13 8 * * *"
+    - cron: "43 9 1 * *"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Maintenance operation to run
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - backup
+          - restore
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SEASON: "2025-26"
+      LIVE_API_URL: ${{ vars.LIVE_API_URL }}
+      AWS_ENDPOINT_URL: ${{ vars.AWS_ENDPOINT_URL }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+      AWS_S3_BUCKET_NAME: ${{ vars.AWS_S3_BUCKET_NAME }}
+      AWS_S3_URL_STYLE: ${{ vars.AWS_S3_URL_STYLE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Select scheduled operation
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+        run: |
+          backup=false
+          restore=false
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$REQUESTED_OPERATION" in
+              backup) backup=true ;;
+              restore) restore=true ;;
+              both) backup=true; restore=true ;;
+              *) echo "Unsupported operation: $REQUESTED_OPERATION"; exit 2 ;;
+            esac
+          elif [ "$SCHEDULE" = "13 8 * * *" ]; then
+            backup=true
+          elif [ "$SCHEDULE" = "43 9 1 * *" ]; then
+            restore=true
+          else
+            echo "Unknown schedule: $SCHEDULE"
+            exit 2
+          fi
+          echo "backup=$backup" >> "$GITHUB_OUTPUT"
+          echo "restore=$restore" >> "$GITHUB_OUTPUT"
+
+      - name: Validate maintenance configuration
+        env:
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          test -n "$LIVE_API_URL"
+          test -n "$AWS_ENDPOINT_URL"
+          test -n "$AWS_DEFAULT_REGION"
+          test -n "$AWS_S3_BUCKET_NAME"
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          if [ "${{ steps.mode.outputs.backup }}" = "true" ]; then
+            test -n "$PRODUCTION_DATABASE_URL"
+          fi
+
+      - name: Create, upload, and retain production backup
+        if: steps.mode.outputs.backup == 'true'
+        env:
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          install -d -m 700 .maintenance
+          backup_name="nba-db-production-${SEASON}-$(date -u +%Y%m%dT%H%M%SZ).dump"
+          manifest_sha256="$(curl --fail --silent --show-error \
+            "${LIVE_API_URL}/api/dataset-status?season=${SEASON}" | jq -er '.manifest_sha256')"
+          docker run --rm \
+            --env PRODUCTION_DATABASE_URL \
+            --env BACKUP_NAME="$backup_name" \
+            --volume "$PWD/.maintenance:/backups" \
+            postgres:18-bookworm \
+            sh -c 'pg_dump --format=custom --no-owner --no-acl --file="/backups/${BACKUP_NAME}" "$PRODUCTION_DATABASE_URL"'
+          uv run --locked --no-dev --extra ops python scripts/upload_backup.py \
+            --season "$SEASON" \
+            --backup-file ".maintenance/$backup_name" \
+            --manifest-sha256 "$manifest_sha256" \
+            --retention-days 30 \
+            --minimum-copies 7
+
+      - name: Download newest verified backup
+        if: steps.mode.outputs.restore == 'true'
+        run: |
+          install -d -m 700 .maintenance
+          uv run --locked --no-dev --extra ops python scripts/download_backup.py \
+            --season "$SEASON" \
+            --output-file .maintenance/latest.dump
+
+      - name: Restore and verify in isolated PostgreSQL 18
+        if: steps.mode.outputs.restore == 'true'
+        uses: dagger/dagger-for-github@v8.4.0
+        with:
+          version: "0.21.7"
+          verb: call
+          args: >-
+            restore-backup
+            --backup=.maintenance/latest.dump
+            --season=2025-26
+            --source=.
+
+      - name: Close resolved maintenance alert
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create production-alert --color D73A4A \
+            --description "Automated production operations require attention" --force
+          issue_number="$(gh issue list --state open --label production-alert \
+            --search 'Production maintenance failed in:title' --json number --jq '.[0].number // empty')"
+          if [ -n "$issue_number" ]; then
+            gh issue close "$issue_number" --comment "Resolved by successful maintenance run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+
+      - name: Open maintenance alert
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create production-alert --color D73A4A \
+            --description "Automated production operations require attention" --force
+          issue_number="$(gh issue list --state open --label production-alert \
+            --search 'Production maintenance failed in:title' --json number --jq '.[0].number // empty')"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$issue_number" ]; then
+            gh issue comment "$issue_number" --body "Maintenance failed again: $run_url"
+          else
+            gh issue create --title "Production maintenance failed" \
+              --label production-alert \
+              --body "The scheduled backup or restore drill failed. Investigate the run: $run_url"
+          fi

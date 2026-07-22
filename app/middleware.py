@@ -71,6 +71,9 @@ def _apply_response_policy(request: Request, response: Response, elapsed_ms: flo
     response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    revision = os.getenv("RAILWAY_GIT_COMMIT_SHA", "development")
+    if revision == "development" or re.fullmatch(r"[0-9a-f]{7,40}", revision):
+        response.headers["X-Release-Revision"] = revision
     if request.method == "GET" and response.status_code < 400:
         if request.url.path == "/health":
             response.headers["Cache-Control"] = "no-store"
@@ -101,7 +104,10 @@ class RequestPolicyMiddleware(BaseHTTPMiddleware):
             else uuid4().hex
         )
 
-        if self.enabled and request.method == "GET" and request.url.path.startswith("/api/"):
+        limited_api_request = request.url.path.startswith("/api/") and (
+            request.method == "GET" or request.url.path == "/api/telemetry"
+        )
+        if self.enabled and limited_api_request:
             group = "expensive" if request.url.path in EXPENSIVE_PATHS else "api"
             limit = self.expensive_limit if group == "expensive" else self.general_limit
             allowed, retry_after = self.limiter.check(_client_key(request), group, limit)
