@@ -1,0 +1,51 @@
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+        stages: [pre-commit]
+      - id: check-case-conflict
+        stages: [pre-commit]
+      - id: check-json
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: trailing-whitespace
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: Ruff format staged Python
+        entry: uv run --locked ruff format
+        language: system
+        types: [python]
+      - id: ruff-lint
+        name: Ruff lint staged Python
+        entry: uv run --locked ruff check --fix
+        language: system
+        types: [python]
+      - id: markdown
+        name: Markdown hygiene and local links
+        entry: uv run --locked python scripts/check_docs.py
+        language: system
+        types: [markdown]
+      - id: dagger-affected
+        name: Dagger affected checks
+        entry: uv run --locked python scripts/ci_impact.py pre-push
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false

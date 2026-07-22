@@ -1,4 +1,4 @@
-.PHONY: help install db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-promote require-season require-promotion test test-data clean seasons status lint format typecheck check api
+.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-promote require-season require-promotion test test-data clean seasons status lint format format-check docs typecheck check dagger-check api
 
 # Configuration
 SEASON ?=
@@ -14,6 +14,8 @@ help:
 	@echo ""
 	@echo "Setup:"
 	@echo "  make install     - Install Python dependencies"
+	@echo "  make hooks-install - Install selective pre-commit and pre-push hooks"
+	@echo "  make hooks-run   - Run every lightweight pre-commit hook"
 	@echo ""
 	@echo "Database:"
 	@echo "  make db-start    - Start PostgreSQL container"
@@ -40,8 +42,11 @@ help:
 	@echo "  make test-data   - Run data quality tests (requires loaded data)"
 	@echo "  make lint        - Run ruff linter"
 	@echo "  make format      - Format code with ruff"
+	@echo "  make format-check - Verify ruff formatting"
+	@echo "  make docs        - Validate Markdown and local links"
 	@echo "  make typecheck   - Run mypy type checker"
-	@echo "  make check       - Run all checks (lint + typecheck)"
+	@echo "  make check       - Run native formatting, lint, docs, and type checks"
+	@echo "  make dagger-check - Run the complete portable Dagger pipeline"
 	@echo ""
 	@echo "API:"
 	@echo "  make api         - Start FastAPI server (http://localhost:8000)"
@@ -56,6 +61,15 @@ help:
 # Setup
 install:
 	uv sync
+
+hooks-install:
+	uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+
+hooks-run:
+	uv run pre-commit run --all-files
+
+pre-push:
+	uv run python scripts/ci_impact.py pre-push
 
 # Database commands
 db-start:
@@ -140,11 +154,17 @@ test-data:
 	PYTHONPATH=. uv run python db/tests/test_data_quality.py
 
 lint:
-	uv run ruff check etl/ app/ db/ scripts/ tests/
+	uv run ruff check etl/ app/ db/ scripts/ tests/ .dagger/src/
 
 format:
-	uv run ruff format etl/ app/ db/ scripts/ tests/
-	uv run ruff check --fix etl/ app/ db/ scripts/ tests/
+	uv run ruff format etl/ app/ db/ scripts/ tests/ .dagger/src/
+	uv run ruff check --fix etl/ app/ db/ scripts/ tests/ .dagger/src/
+
+format-check:
+	uv run ruff format --check etl/ app/ db/ scripts/ tests/ .dagger/src/
+
+docs:
+	uv run python scripts/check_docs.py
 
 typecheck:
 	uv run mypy etl/ app/ db/ scripts/
@@ -153,8 +173,11 @@ typecheck:
 api:
 	uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-check: lint typecheck
+check: format-check lint docs typecheck
 	@echo "All checks passed!"
+
+dagger-check:
+	dagger call full --source=.
 
 # Maintenance
 clean:

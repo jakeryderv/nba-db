@@ -133,9 +133,7 @@ def ensure_readonly_role(conn: psycopg.Connection) -> None:
                 sql.SQL(action), sql.Identifier(role_name), sql.Literal(password)
             )
         )
-        cur.execute(
-            sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role_name))
-        )
+        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role_name)))
         cur.execute(
             sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(
                 sql.Identifier(role_name)

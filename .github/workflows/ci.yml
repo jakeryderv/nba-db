@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,50 +18,43 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      # CI only uses its ephemeral service database. It never receives a
-      # production DATABASE_URL or credentials.
-      DATABASE_URL: ""
-      DB_HOST: 127.0.0.1
-      DB_PORT: "5432"
-      DB_USER: nba_user
-      DB_PASSWORD: nba_password
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: nba_user
-          POSTGRES_PASSWORD: nba_password
-          POSTGRES_DB: nba_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Determine pull-request impact
+        if: github.event_name == 'pull_request'
+        id: changes
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: python scripts/ci_impact.py github-output --base-ref "$BASE_REF"
+
+      - name: Run affected Dagger checks
+        if: github.event_name == 'pull_request'
+        uses: dagger/dagger-for-github@v8.4.0
         with:
-          enable-cache: true
+          version: "0.21.7"
+          verb: call
+          args: >-
+            check-affected
+            --source=.
+            --changed-paths-b64=${{ steps.changes.outputs.paths_b64 }}
 
-      - uses: actions/setup-python@v7.0.0
+      - name: Run full Dagger checks
+        if: github.event_name != 'pull_request'
+        uses: dagger/dagger-for-github@v8.4.0
         with:
-          python-version: "3.11"
+          version: "0.21.7"
+          verb: call
+          args: full --source=.
 
-      - name: Install dependencies
-        run: uv sync --locked
-
-      - name: Lint
-        run: uv run --locked ruff check etl/ app/ db/ scripts/ tests/
-
-      - name: Typecheck
-        run: uv run --locked mypy etl/ app/ db/ scripts/
-
-      - name: Test
-        run: uv run --locked pytest tests/ -v
+      - name: Audit dependencies
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: dagger/dagger-for-github@v8.4.0
+        with:
+          version: "0.21.7"
+          verb: call
+          args: dependency-audit --source=. --audit-key=${{ github.run_id }}

@@ -1,6 +1,7 @@
 """NBA Database API - FastAPI Application."""
 
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
@@ -55,6 +56,9 @@ app = FastAPI(
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Minimal container images do not always ship a MIME database. Keep static
+# JavaScript responses consistent across Dagger, local, and production hosts.
+mimetypes.add_type("text/javascript", ".js")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -76,9 +80,7 @@ async def add_cache_headers(request: Request, call_next):
         elif request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
         elif request.url.path.startswith("/api/"):
-            response.headers["Cache-Control"] = (
-                "public, max-age=300, stale-while-revalidate=3600"
-            )
+            response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
     return response
 
 
