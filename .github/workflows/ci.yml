@@ -60,7 +60,7 @@ jobs:
           args: dependency-audit --source=. --audit-key=${{ github.run_id }}
 
   live-health:
-    if: github.event_name == 'schedule' && vars.LIVE_API_URL != ''
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && vars.LIVE_API_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -74,5 +74,7 @@ jobs:
         env:
           LIVE_API_URL: ${{ vars.LIVE_API_URL }}
           EXPECTED_GAMES: "1230"
+          EXPECTED_PLAYERS: "582"
           EXPECTED_SHOT_ATTEMPTS: "219160"
+          MAX_RESPONSE_MS: "3000"
         run: uv run --locked python scripts/check_live.py

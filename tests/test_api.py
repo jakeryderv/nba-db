@@ -117,6 +117,7 @@ def test_home_page_serves_html(client):
 def test_static_assets_are_served_with_revalidation_cache(client):
     for path, content_type in (
         ("/static/styles.css", "text/css"),
+        ("/static/core.js", "text/javascript"),
         ("/static/app.js", "text/javascript"),
     ):
         response = client.get(path)
@@ -124,6 +125,16 @@ def test_static_assets_are_served_with_revalidation_cache(client):
         assert content_type in response.headers["content-type"]
         assert response.headers["cache-control"] == "public, max-age=3600, must-revalidate"
         assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_large_api_responses_support_gzip(client):
+    response = client.get(
+        f"/api/shot-chart?season={SEED_SEASON}&team_id={LAKERS}",
+        headers={"Accept-Encoding": "gzip"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-encoding"] == "gzip"
 
 
 def test_list_seasons(client):
