@@ -54,3 +54,28 @@ def test_production_dependencies_exclude_etl_and_development_tooling() -> None:
     for package in ("nba-api", "numpy", "pandas", "ruff", "mypy", "playwright"):
         assert package in development
     assert start_command.count("uv run --no-sync") == 2
+
+
+def test_ops_only_backup_commands_do_not_import_etl_dependencies() -> None:
+    script = """
+import sys
+
+class BlockEtlDependencies:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'numpy', 'pandas'}:
+            raise ImportError(f'blocked ETL dependency: {fullname}')
+        return None
+
+sys.meta_path.insert(0, BlockEtlDependencies())
+import scripts.download_backup
+import scripts.upload_backup
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
