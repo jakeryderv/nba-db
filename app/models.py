@@ -255,6 +255,11 @@ class ShotZoneSummary(BaseModel):
     attempts: int
     makes: int
     fg_pct: float | None = None
+    frequency: float
+    points: int
+    points_per_shot: float | None = None
+    league_fg_pct: float | None = None
+    fg_pct_vs_league: float | None = None
 
 
 class ShotChart(BaseModel):
@@ -264,6 +269,10 @@ class ShotChart(BaseModel):
     attempts: int
     makes: int
     fg_pct: float | None = None
+    points: int
+    points_per_shot: float | None = None
+    league_fg_pct: float | None = None
+    fg_pct_vs_league: float | None = None
     truncated: bool
     data: list[ShotAttempt]
     zones: list[ShotZoneSummary]

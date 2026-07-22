@@ -254,6 +254,8 @@ def test_player_shot_chart_returns_locations_summary_and_zones(client):
     assert body["subject_type"] == "player"
     assert body["subject_id"] == LEBRON
     assert (body["makes"], body["attempts"], body["fg_pct"]) == (120, 200, 0.6)
+    assert (body["points"], body["points_per_shot"]) == (260, 1.3)
+    assert (body["league_fg_pct"], body["fg_pct_vs_league"]) == (0.559, 0.041)
     assert body["truncated"] is False
     assert len(body["data"]) == 200
     assert {
@@ -274,6 +276,11 @@ def test_player_shot_chart_returns_locations_summary_and_zones(client):
         "attempts": 60,
         "makes": 20,
         "fg_pct": 0.333,
+        "frequency": 0.3,
+        "points": 60,
+        "points_per_shot": 1.0,
+        "league_fg_pct": 0.333,
+        "fg_pct_vs_league": 0.0,
     }
     assert zones["Restricted Area"]["attempts"] == 140
 
@@ -298,6 +305,11 @@ def test_team_shot_chart_filters_and_reports_truncation(client):
     assert body["subject_type"] == "team"
     assert body["attempts"] == 2
     assert body["makes"] == 2
+    assert body["points"] == 6
+    assert body["points_per_shot"] == 3.0
+    assert body["league_fg_pct"] is None
+    assert body["fg_pct_vs_league"] is None
+    assert all(zone["league_fg_pct"] is None for zone in body["zones"])
     assert all(shot["period"] == 1 and shot["shot_made"] for shot in body["data"])
 
     truncated = client.get(
@@ -307,6 +319,43 @@ def test_team_shot_chart_filters_and_reports_truncation(client):
     assert truncated["attempts"] == 200
     assert len(truncated["data"]) == 100
     assert truncated["truncated"] is True
+
+
+def test_shot_chart_games_are_subject_specific_and_sorted(client):
+    player_response = client.get(
+        "/api/shot-chart/games",
+        params={"season": SEED_SEASON, "player_id": TATUM},
+    )
+
+    assert player_response.status_code == 200
+    games = player_response.json()
+    assert len(games) == 5
+    assert games[0]["id"] == "0022400005"
+    assert games[0]["away_team"] == "Boston Celtics"
+    assert games[0]["home_team"] == "Los Angeles Lakers"
+
+    team_response = client.get(
+        "/api/shot-chart/games",
+        params={"season": SEED_SEASON, "team_id": LAKERS},
+    )
+    assert len(team_response.json()) == 10
+
+
+def test_shot_chart_games_requires_exactly_one_subject(client):
+    assert client.get("/api/shot-chart/games", params={"season": SEED_SEASON}).status_code == 422
+    assert (
+        client.get(
+            "/api/shot-chart/games",
+            params={"season": SEED_SEASON, "player_id": LEBRON, "team_id": LAKERS},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/api/shot-chart/games", params={"season": SEED_SEASON, "player_id": 1}
+        ).status_code
+        == 404
+    )
 
 
 def test_shot_chart_requires_one_known_subject_and_valid_filters(client):

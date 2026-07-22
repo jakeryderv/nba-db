@@ -96,6 +96,7 @@ def test_detail_views_have_linkable_hash_routes() -> None:
     for detail in ("team", "player", "game"):
         assert f'href="#{detail}/${{encodeURIComponent(' in javascript
     assert "#shots/${encodeURIComponent(type)}" in javascript
+    assert "new URLSearchParams({game_id: gameId})" in javascript
 
 
 def test_shot_chart_is_accessible_and_uses_no_third_party_script() -> None:
@@ -104,7 +105,11 @@ def test_shot_chart_is_accessible_and_uses_no_third_party_script() -> None:
 
     assert 'id="shot-chart-form"' in html
     assert 'aria-live="polite"' in html
+    assert '<select class="filter-select" id="shot-game">' in html
     assert 'role="img" aria-label="Half-court shot chart"' in javascript
+    assert 'role="img" aria-label="Shot density heatmap"' in javascript
+    assert "frequency" in javascript
+    assert "fg_pct_vs_league" in javascript
     assert "https://" not in javascript
 
 

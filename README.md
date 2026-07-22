@@ -38,7 +38,8 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | `GET /api/players/{id}/stats` | Player season averages |
 | `GET /api/players/{id}/games` | Paginated player game log |
 | `GET /api/shot-chart/players` | Players with shot attempts in a season |
-| `GET /api/shot-chart` | Player or team shot locations and complete zone aggregates |
+| `GET /api/shot-chart/games` | Games with attempts for one player or team |
+| `GET /api/shot-chart` | Player or team locations, efficiency, frequency, and league-relative zone analytics |
 | `GET /api/comparisons/players` | Compare exactly two players for a season |
 | `GET /api/comparisons/teams` | Compare two teams, including head-to-head results |
 | `GET /api/games` | Games (filter by `?season=`, `?team_id=`) |
@@ -53,6 +54,12 @@ All endpoints are read-only. Interactive docs at `/docs`.
 curl "https://nba-api-production-0cd7.up.railway.app/api/players?search=lebron"
 curl "https://nba-api-production-0cd7.up.railway.app/api/leaders/points?season=2025-26"
 ```
+
+Shot-chart filters are shareable in the dashboard URL and can be opened directly from player,
+team, and game details. Zone results include shot frequency, points per shot, and the field-goal
+percentage difference from the league under the same season, game, opponent, period, and shot-type
+filters. League comparisons are omitted when filtering to makes or misses because that filter makes
+an efficiency baseline meaningless.
 
 ## Local development
 

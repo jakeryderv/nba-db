@@ -106,6 +106,7 @@ def test_standings_open_team_dashboard(page: Page, live_url: str) -> None:
     expect(dialog).to_be_visible()
     expect(dialog.get_by_text("10-0", exact=True).first).to_be_visible()
     expect(dialog.get_by_role("link", name="LeBron James")).to_be_visible()
+    expect(dialog.get_by_role("link", name="View season shot chart")).to_be_visible()
     expect(dialog.get_by_role("button", name="Close team dashboard")).to_be_focused()
 
     page.keyboard.press("Escape")
@@ -123,6 +124,7 @@ def test_leader_opens_player_profile_and_game_log(page: Page, live_url: str) -> 
     expect(dialog.get_by_text("LAL", exact=True)).to_be_visible()
     expect(dialog.get_by_role("heading", name="Recent Games")).to_be_visible()
     expect(dialog.get_by_role("cell", name="vs BOS", exact=True).first).to_be_visible()
+    expect(dialog.get_by_role("link", name="View season shot chart")).to_be_visible()
 
 
 def test_game_card_opens_full_box_score(page: Page, live_url: str) -> None:
@@ -187,11 +189,27 @@ def test_shot_chart_supports_filters_and_player_overlay(page: Page, live_url: st
     page.locator("#shot-result").select_option("true")
     page.get_by_role("button", name="Build chart").click()
 
-    expect(page).to_have_url(re.compile(rf"#shots/player/{LEBRON}/{TATUM}$"))
+    expect(page).to_have_url(re.compile(rf"#shots/player/{LEBRON}/{TATUM}\?made=true$"))
     result = page.locator("#shot-chart-result")
     expect(result.get_by_role("heading", name="LeBron James")).to_be_visible()
     expect(result.get_by_role("heading", name="Jayson Tatum")).to_be_visible()
     expect(result.get_by_role("img", name="Half-court shot chart")).to_be_visible()
+    expect(result.get_by_role("img", name="Shot density heatmap")).to_be_visible()
     expect(result.locator(".shot-marker.shot-series-1.made")).to_have_count(120)
     expect(result.locator(".shot-marker.shot-series-2.made")).to_have_count(45)
     expect(result.locator(".shot-marker.missed")).to_have_count(0)
+
+
+def test_game_box_score_opens_shareable_contextual_shot_chart(page: Page, live_url: str) -> None:
+    game_id = "0022400001"
+    page.goto(f"{live_url}/#game/{game_id}")
+    dialog = page.get_by_role("dialog", name="Boston Celtics @ Los Angeles Lakers")
+    dialog.get_by_role("link", name="Compare game shot charts").click()
+
+    expect(page).to_have_url(re.compile(rf"#shots/team/{CELTICS}/{LAKERS}\?game_id={game_id}$"))
+    expect(page.locator("#shot-game")).to_have_value(game_id)
+    result = page.locator("#shot-chart-result")
+    expect(result.get_by_role("heading", name="Boston Celtics")).to_be_visible()
+    expect(result.get_by_role("heading", name="Los Angeles Lakers")).to_be_visible()
+    expect(result.get_by_text(re.compile("vs league")).first).to_be_visible()
+    expect(result.locator(".shot-marker")).to_have_count(39)

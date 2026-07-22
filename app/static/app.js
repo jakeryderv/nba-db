@@ -1,4 +1,4 @@
-let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready = false, activeSection = 'standings';
+let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready = false, activeSection = 'standings', shotGamesRequest = 0;
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
         const sections = new Set(['standings', 'leaders', 'games', 'shots', 'players', 'compare']);
 
@@ -48,7 +48,11 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
             document.getElementById('games-team').onchange = loadGames;
             document.getElementById('games-sort').onchange = loadGames;
             document.getElementById('leaders-stat').onchange = loadLeaders;
-            document.getElementById('shot-subject-type').onchange = populateShotSelectors;
+            document.getElementById('shot-subject-type').onchange = () => {
+                populateShotSelectors();
+                populateShotGames('');
+            };
+            document.getElementById('shot-subject').onchange = () => populateShotGames('');
             document.getElementById('shot-chart-form').onsubmit = event => {
                 event.preventDefault();
                 navigateShotChart();
@@ -127,13 +131,18 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
         }
 
         function parseRoute() {
-            const [kind, ...parts] = window.location.hash.slice(1).split('/');
-            return {kind: kind || 'standings', parts: parts.map(decodeURIComponent)};
+            const [path, query = ''] = window.location.hash.slice(1).split('?');
+            const [kind, ...parts] = path.split('/');
+            return {
+                kind: kind || 'standings',
+                parts: parts.map(decodeURIComponent),
+                filters: new URLSearchParams(query)
+            };
         }
 
-        function route() {
+        async function route() {
             if (!ready) return;
-            const {kind, parts} = parseRoute();
+            const {kind, parts, filters} = parseRoute();
             const id = parts[0] || null;
             if (kind === 'compare' && parts.length === 3 && ['players', 'teams'].includes(parts[0])) {
                 activeSection = 'compare';
@@ -149,6 +158,8 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 closeModals();
                 switchTo('shots', false);
                 setShotSelection(parts[0], parts[1], parts[2] || '');
+                setShotFilters(filters);
+                await populateShotGames(filters.get('game_id') || '');
                 loadShotChart(parts[0], parts[1], parts[2] || '');
                 return;
             }
@@ -254,6 +265,38 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
             }));
         }
 
+        async function populateShotGames(selected = null) {
+            const request = ++shotGamesRequest;
+            const select = document.getElementById('shot-game');
+            const type = document.getElementById('shot-subject-type').value;
+            const id = document.getElementById('shot-subject').value;
+            const prior = selected === null ? select.value : selected;
+            const prompt = document.createElement('option');
+            prompt.value = '';
+            prompt.textContent = id ? 'Loading games…' : 'All games';
+            select.replaceChildren(prompt);
+            if (!id) return;
+
+            try {
+                const params = new URLSearchParams({season});
+                params.set(type === 'player' ? 'player_id' : 'team_id', id);
+                const games = await api(`/api/shot-chart/games?${params}`);
+                if (request !== shotGamesRequest) return;
+                prompt.textContent = 'All games';
+                select.replaceChildren(prompt, ...games.map(game => {
+                    const option = document.createElement('option');
+                    option.value = game.id;
+                    option.textContent = `${present(game.game_date, 'Date TBD')} · ${game.away_team} @ ${game.home_team}`;
+                    return option;
+                }));
+                if (games.some(game => game.id === prior)) select.value = prior;
+            } catch (error) {
+                if (request !== shotGamesRequest) return;
+                prompt.textContent = 'Games unavailable';
+                select.replaceChildren(prompt);
+            }
+        }
+
         function loadShots() {
             const id = document.getElementById('shot-subject').value;
             if (id) loadShotChart(document.getElementById('shot-subject-type').value, id, document.getElementById('shot-compare-subject').value);
@@ -268,7 +311,8 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 showStatus(result, 'error', comparison ? 'Choose two distinct subjects.' : 'Choose a subject.');
                 return;
             }
-            const routeValue = `#shots/${encodeURIComponent(type)}/${encodeURIComponent(id)}${comparison ? `/${encodeURIComponent(comparison)}` : ''}`;
+            const query = shotFilterParams();
+            const routeValue = shotRoute(type, id, comparison, query);
             if (window.location.hash === routeValue) loadShotChart(type, id, comparison);
             else window.location.hash = routeValue;
         }
@@ -280,9 +324,20 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
             document.getElementById('shot-compare-subject').value = comparison;
         }
 
-        function shotParams(type, id) {
-            const params = new URLSearchParams({season, max_points: '10000'});
-            params.set(type === 'player' ? 'player_id' : 'team_id', id);
+        function setShotFilters(filters) {
+            const controls = {
+                opponent_id: 'shot-opponent',
+                period: 'shot-period',
+                made: 'shot-result',
+                shot_type: 'shot-type'
+            };
+            Object.entries(controls).forEach(([key, control]) => {
+                document.getElementById(control).value = filters.get(key) || '';
+            });
+        }
+
+        function shotFilterParams() {
+            const params = new URLSearchParams();
             const filters = {
                 opponent_id: document.getElementById('shot-opponent').value,
                 period: document.getElementById('shot-period').value,
@@ -291,6 +346,24 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 game_id: document.getElementById('shot-game').value.trim()
             };
             Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+            return params;
+        }
+
+        function shotRoute(type, id, comparison = '', filters = new URLSearchParams()) {
+            const path = `#shots/${encodeURIComponent(type)}/${encodeURIComponent(id)}${comparison ? `/${encodeURIComponent(comparison)}` : ''}`;
+            const query = filters.toString();
+            return `${path}${query ? `?${query}` : ''}`;
+        }
+
+        function contextualShotRoute(type, id, gameId, comparison = '') {
+            return shotRoute(type, id, comparison, new URLSearchParams({game_id: gameId}));
+        }
+
+        function shotParams(type, id) {
+            const params = shotFilterParams();
+            params.set('season', season);
+            params.set('max_points', '10000');
+            params.set(type === 'player' ? 'player_id' : 'team_id', id);
             return params;
         }
 
@@ -311,13 +384,14 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                         <div class="shot-summary shot-series-${index + 1}">
                             <h3>${h(names[index])}</h3>
                             <strong>${h(chart.makes)} / ${h(chart.attempts)}</strong>
-                            <span>${h(pct(chart.fg_pct))} FG</span>
+                            <span>${h(pct(chart.fg_pct))} FG · ${h(present(chart.points_per_shot))} points/shot${chart.fg_pct_vs_league === null ? '' : ` · ${h(percentagePoints(chart.fg_pct_vs_league))} vs league`}</span>
                         </div>`).join('')}</div>
                     ${charts.some(chart => chart.truncated) ? '<p class="shot-warning">The plotted points are capped for browser performance; zone totals remain complete.</p>' : ''}
-                    <div class="shot-layout">
+                    <div class="shot-visual-grid">
                         ${shotCourt(charts, names)}
-                        ${shotZoneTable(charts, names)}
-                    </div>`;
+                        ${shotHeatmap(charts, names)}
+                    </div>
+                    ${shotZoneTable(charts, names)}`;
             } catch (error) {
                 showError(result, 'shot chart', error);
             }
@@ -334,10 +408,46 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
             return `<div class="shot-court-card">
                 <div class="shot-legend">${names.map((name, index) => `<span class="shot-series-${index + 1}"><i></i>${h(name)}</span>`).join('')}<span><b class="made-key"></b> made</span><span><b class="missed-key"></b> missed</span></div>
                 <svg class="shot-court" viewBox="0 0 520 520" role="img" aria-label="Half-court shot chart">
-                    <g class="court-lines"><rect x="10" y="10" width="500" height="490"/><line x1="10" y1="500" x2="510" y2="500"/><line x1="230" y1="492" x2="290" y2="492"/><circle cx="260" cy="480" r="8"/><rect x="180" y="310" width="160" height="190"/><circle cx="260" cy="310" r="60"/><path d="M30 500 L30 360 A230 230 0 0 1 490 360 L490 500"/><path d="M200 480 A60 60 0 0 0 320 480"/></g>
+                    ${shotCourtLines()}
                     ${markers}
                 </svg>
             </div>`;
+        }
+
+        function shotCourtLines() {
+            return '<g class="court-lines"><rect x="10" y="10" width="500" height="490"/><line x1="10" y1="500" x2="510" y2="500"/><line x1="230" y1="492" x2="290" y2="492"/><circle cx="260" cy="480" r="8"/><rect x="180" y="310" width="160" height="190"/><circle cx="260" cy="310" r="60"/><path d="M30 500 L30 360 A230 230 0 0 1 490 360 L490 500"/><path d="M200 480 A60 60 0 0 0 320 480"/></g>';
+        }
+
+        function shotHeatmap(charts, names) {
+            const cells = charts.flatMap((chart, series) => {
+                const bins = new Map();
+                chart.data.forEach(shot => {
+                    const x = Math.max(10, Math.min(510, Number(shot.loc_x) + 260));
+                    const y = Math.max(10, Math.min(500, 480 - Number(shot.loc_y)));
+                    const key = `${Math.floor(x / 32)}|${Math.floor(y / 32)}`;
+                    bins.set(key, (bins.get(key) || 0) + 1);
+                });
+                const max = Math.max(...bins.values(), 1);
+                return [...bins.entries()].map(([key, count]) => {
+                    const [column, row] = key.split('|').map(Number);
+                    const radius = 7 + 18 * Math.sqrt(count / max);
+                    const opacity = 0.18 + 0.55 * (count / max);
+                    return `<circle class="shot-heat-cell shot-series-${series + 1}" cx="${h(column * 32 + 16)}" cy="${h(row * 32 + 16)}" r="${h(radius.toFixed(1))}" opacity="${h(opacity.toFixed(2))}"><title>${h(names[series])}: ${h(count)} attempts near this location</title></circle>`;
+                });
+            }).join('');
+            return `<div class="shot-court-card">
+                <div class="shot-legend"><strong>Attempt density</strong>${names.map((name, index) => `<span class="shot-series-${index + 1}"><i></i>${h(name)}</span>`).join('')}</div>
+                <svg class="shot-court" viewBox="0 0 520 520" role="img" aria-label="Shot density heatmap">
+                    ${shotCourtLines()}
+                    ${cells}
+                </svg>
+            </div>`;
+        }
+
+        function percentagePoints(value) {
+            const number = Number(value);
+            if (value === null || value === undefined || !Number.isFinite(number)) return '-';
+            return `${number > 0 ? '+' : ''}${(number * 100).toFixed(1)} pp`;
         }
 
         function shotZoneTable(charts, names) {
@@ -350,7 +460,10 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                     const [basic, area, range] = key.split('|');
                     return `<tr><td><strong>${h(basic)}</strong><br><span class="detail-meta">${h(area)} · ${h(range)}</span></td>${maps.map(map => {
                         const zone = map.get(key);
-                        return `<td class="num">${zone ? `${h(zone.makes)}/${h(zone.attempts)} · ${h(pct(zone.fg_pct))}` : '-'}</td>`;
+                        return `<td class="num">${zone ? `
+                            <strong>${h(zone.makes)}/${h(zone.attempts)} · ${h(pct(zone.fg_pct))}</strong><br>
+                            <span class="detail-meta">${h(pct(zone.frequency))} frequency · ${h(present(zone.points_per_shot))} PPS${zone.fg_pct_vs_league === null ? '' : ` · ${h(percentagePoints(zone.fg_pct_vs_league))} vs league`}</span>
+                        ` : '-'}</td>`;
                     }).join('')}</tr>`;
                 }).join('')}</tbody>
             </table></div></div>`;
@@ -634,6 +747,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                         ${cur ? `<a class="clickable" href="#team/${encodeURIComponent(cur.team_id)}" data-action="team">${h(cur.team_abbr)}</a> &middot; ` : ''}
                         ${p.is_active ? 'Active' : 'Inactive'} &middot; ${h(season)} Regular Season
                     </p>
+                    <div class="detail-actions"><a class="secondary-button" href="${h(shotRoute('player', id))}">View season shot chart</a></div>
                     <div class="stats-grid">
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.ppg))}</div><div class="stat-box-label">PPG</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(present(cur?.rpg))}</div><div class="stat-box-label">RPG</div></div>
@@ -665,16 +779,16 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                     ` : '<p class="empty-message">No statistics available</p>'}
                     <div class="detail-section">
                         <h3 class="section-subtitle">Recent Games</h3>
-                        ${playerGameLogTable(games.data)}
+                        ${playerGameLogTable(games.data, id)}
                     </div>
                 `;
             } catch(e) { showError(b, 'player', e); }
         }
 
-        function playerGameLogTable(games) {
+        function playerGameLogTable(games, playerId) {
             if (!games.length) return '<p class="detail-meta">No games available.</p>';
             return `<div class="table-container"><div class="table-scroll"><table>
-                <thead><tr><th>Date</th><th>Matchup</th><th>Result</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>FG</th><th>3PT</th><th>+/-</th></tr></thead>
+                <thead><tr><th>Date</th><th>Matchup</th><th>Result</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>FG</th><th>3PT</th><th>+/-</th><th>Shots</th></tr></thead>
                 <tbody>${games.map(g => `
                     <tr>
                         <td><a class="clickable" href="#game/${encodeURIComponent(g.game_id)}" data-action="game">${h(present(g.game_date))}</a></td>
@@ -687,6 +801,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                         <td class="num">${h(g.fgm)}-${h(g.fga)}</td>
                         <td class="num">${h(g.fg3m)}-${h(g.fg3a)}</td>
                         <td class="num">${g.plus_minus > 0 ? '+' : ''}${h(present(g.plus_minus, 0))}</td>
+                        <td><a class="context-link" href="${h(contextualShotRoute('player', playerId, g.game_id))}">Chart</a></td>
                     </tr>
                 `).join('')}</tbody>
             </table></div></div>`;
@@ -717,17 +832,20 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                             </div>
                         </div>
                     </div>
+                    <div class="detail-actions">
+                        <a class="secondary-button" href="${h(contextualShotRoute('team', g.away_team_id, g.id, g.home_team_id))}">Compare game shot charts</a>
+                    </div>
                     <h3 class="section-subtitle">${h(g.away_team)}</h3>
-                    ${boxscoreTable(d.away_players)}
+                    ${boxscoreTable(d.away_players, g.id)}
                     <h3 class="section-subtitle spaced-title">${h(g.home_team)}</h3>
-                    ${boxscoreTable(d.home_players)}
+                    ${boxscoreTable(d.home_players, g.id)}
                 `;
             } catch(e) { showError(b, 'game', e); }
         }
 
-        function boxscoreTable(players) {
+        function boxscoreTable(players, gameId) {
             return `<div class="table-container"><div class="table-scroll"><table>
-                <thead><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FG</th><th>3PT</th><th>FT</th><th>+/-</th></tr></thead>
+                <thead><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FG</th><th>3PT</th><th>FT</th><th>+/-</th><th>Shots</th></tr></thead>
                 <tbody>${players.map(p => `
                     <tr>
                         <td><a class="clickable" href="#player/${encodeURIComponent(p.player_id)}" data-action="player">${h(p.player_name)}</a></td>
@@ -741,6 +859,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                         <td class="num">${h(present(p.fg3m))}-${h(present(p.fg3a))}</td>
                         <td class="num">${h(present(p.ftm))}-${h(present(p.fta))}</td>
                         <td class="num ${p.plus_minus > 0 ? 'positive' : p.plus_minus < 0 ? 'negative' : ''}">${p.plus_minus > 0 ? '+' : ''}${h(present(p.plus_minus, 0))}</td>
+                        <td>${p.fga ? `<a class="context-link" href="${h(contextualShotRoute('player', p.player_id, gameId))}">Chart</a>` : '-'}</td>
                     </tr>
                 `).join('')}</tbody>
             </table></div></div>`;
@@ -761,6 +880,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 document.getElementById('team-modal-title').textContent = t.full_name;
                 b.innerHTML = `
                     <p class="detail-meta">${h(t.city)}, ${h(t.state)} &middot; Founded ${h(present(t.year_founded))} &middot; ${h(season)} Regular Season</p>
+                    <div class="detail-actions"><a class="secondary-button" href="${h(shotRoute('team', id))}">View season shot chart</a></div>
                     <div class="stats-grid">
                         <div class="stat-box"><div class="stat-box-value">${h(summary.wins)}-${h(summary.losses)}</div><div class="stat-box-label">Record</div></div>
                         <div class="stat-box"><div class="stat-box-value">${h(pct(summary.win_pct))}</div><div class="stat-box-label">Win%</div></div>
@@ -812,7 +932,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
 
         function teamGameTable(games, teamId) {
             return `<div class="table-container"><div class="table-scroll"><table>
-                <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th></tr></thead>
+                <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th><th>Shots</th></tr></thead>
                 <tbody>${games.map(g => {
                     const home = String(g.home_team_id) === String(teamId);
                     const opponent = home ? g.away_team : g.home_team;
@@ -825,6 +945,7 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                             <td>${home ? 'vs' : '@'} ${h(opponent)}</td>
                             <td><span class="badge badge-${win ? 'win' : 'loss'}">${win ? 'W' : 'L'}</span></td>
                             <td class="num strong">${h(teamScore)}-${h(opponentScore)}</td>
+                            <td><a class="context-link" href="${h(contextualShotRoute('team', teamId, g.id))}">Chart</a></td>
                         </tr>`;
                 }).join('')}</tbody>
             </table></div></div>`;
