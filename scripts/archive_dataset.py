@@ -17,10 +17,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from etl.season_lifecycle import CLEAN_ROOT, verify_manifest  # noqa: E402
 from nba_config import DEFAULT_SEASON  # noqa: E402
 
 RAW_ROOT = PROJECT_ROOT / "data" / "raw"
+CLEAN_ROOT = PROJECT_ROOT / "data" / "clean"
 
 
 class ArtifactArchiveError(RuntimeError):
@@ -71,6 +71,10 @@ def create_archive(
     clean_root: Path = CLEAN_ROOT,
 ) -> dict[str, Any]:
     """Validate and package raw inputs plus clean verified outputs."""
+    # Keep ETL-only numpy/pandas imports out of backup upload/download commands,
+    # which intentionally run with the lightweight production + ops dependency set.
+    from etl.season_lifecycle import verify_manifest
+
     dataset = verify_manifest(clean_root, season)
     if not output_dir.is_dir():
         raise ArtifactArchiveError("Artifact output directory must already exist")
