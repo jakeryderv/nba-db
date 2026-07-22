@@ -69,18 +69,19 @@ Every data command requires an explicit season. There is no default season or de
 
 ## Safe season lifecycle
 
-The guarded lifecycle handles exactly one NBA **Regular Season** dataset at a time. Preseason, All-Star, Play-In, and playoff datasets are outside this workflow's scope. Run extraction from a trusted machine that can reach `stats.nba.com`; GitHub Actions performs validation only against its ephemeral PostgreSQL service and never loads production.
+The guarded lifecycle handles exactly one NBA **Regular Season** dataset at a time. Preseason, All-Star, Play-In, and playoff datasets are outside this workflow's scope. Run extraction and official verification from a trusted machine that can reach `stats.nba.com`; GitHub Actions uses deterministic fixtures and its ephemeral PostgreSQL service, never calls NBA endpoints, and never loads production.
 
 ### 1. Build and validate one season
 
-Choose the season deliberately. This force-downloads fresh source data, transforms it, validates file relationships and official Regular Season game IDs in the `002.......` format, and writes `data/clean/<season>/manifest.json` with source scope, row counts, and SHA-256 checksums.
+Choose the season deliberately. This force-downloads fresh source data, transforms it, validates file relationships and official Regular Season game IDs in the `002.......` format, then compares calculated team and player counting-stat totals with the NBA's `LeagueDashTeamStats` and `LeagueDashPlayerStats` totals. Games played, records, and points must match exactly. Other counting stats allow a documented one-count difference because NBA game-log and aggregate feeds can diverge after stat corrections; every difference remains visible in the report. Only a passing `data/clean/<season>/verification.json` can be bound into `manifest.json` with source scope, row counts, and SHA-256 checksums.
 
 ```bash
 make season-build SEASON=2025-26
 uv run python -m json.tool data/clean/2025-26/manifest.json
+uv run python -m json.tool data/clean/2025-26/verification.json
 ```
 
-Do not edit transformed files after the manifest is created. Local load and production promotion recompute the checksums and fail closed if the dataset changed.
+To rerun only the network-backed cross-check after transformation, use `make verify-official SEASON=2025-26`. Do not edit transformed files after verification or manifest creation. The report records every transformed-file checksum, and local load and production promotion fail closed if the dataset, report, or manifest changed. This check validates season totals; the existing relational and API tests still cover per-game calculations and application behavior.
 
 ### 2. Replace the local database
 
