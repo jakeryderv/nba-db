@@ -7,23 +7,28 @@ Input: data/raw/{season}/league_game_log_*.json and shot_chart.json
 Output: data/clean/{season}/*.csv
 
 Usage:
-    python transform.py                    # Default season (2024-25)
-    python transform.py --season 2023-24   # Specific season
+    python transform.py                    # Verified product default
+    python transform.py --season 2025-26   # Explicit season
 """
 
 import argparse
 import json
 import os
 import re
+import sys
 
 import pandas as pd
 
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from nba_config import DEFAULT_SEASON  # noqa: E402
+
 BASE_RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
 BASE_CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
-DEFAULT_SEASON = "2024-25"
 SEASON_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
 

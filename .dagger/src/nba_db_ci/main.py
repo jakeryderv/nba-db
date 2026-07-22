@@ -14,10 +14,11 @@ from .impact import Impact, classify_paths
 
 PYTHON_IMAGE = "python:3.11.14-slim-bookworm"
 UV_IMAGE = "ghcr.io/astral-sh/uv:0.10.4"
-POSTGRES_IMAGE = "postgres:16-bookworm"
+POSTGRES_MAJOR = "18"
+POSTGRES_IMAGE = f"postgres:{POSTGRES_MAJOR}-bookworm"
 WORKDIR = "/workspace"
-PYTHON_PATHS = ["etl/", "app/", "db/", "scripts/", "tests/", ".dagger/src/"]
-MYPY_PATHS = ["etl/", "app/", "db/", "scripts/"]
+PYTHON_PATHS = ["etl/", "app/", "db/", "scripts/", "tests/", ".dagger/src/", "nba_config.py"]
+MYPY_PATHS = ["etl/", "app/", "db/", "scripts/", "nba_config.py"]
 
 
 @object_type
@@ -49,14 +50,26 @@ class NbaDbCi:
         return self._dependencies(source).with_directory(WORKDIR, source)
 
     def _with_test_tools(self, container: dagger.Container) -> dagger.Container:
-        return container.with_env_variable("DEBIAN_FRONTEND", "noninteractive").with_exec(
-            [
-                "sh",
-                "-c",
-                "apt-get update && "
-                "apt-get install -y --no-install-recommends make nodejs && "
-                "rm -rf /var/lib/apt/lists/*",
-            ]
+        postgres_tools = dag.container().from_(POSTGRES_IMAGE)
+        return (
+            container.with_env_variable("DEBIAN_FRONTEND", "noninteractive")
+            .with_exec(
+                [
+                    "sh",
+                    "-c",
+                    "apt-get update && "
+                    "apt-get install -y --no-install-recommends make nodejs postgresql-client && "
+                    "rm -rf /var/lib/apt/lists/*",
+                ]
+            )
+            .with_file(
+                "/usr/local/bin/pg_dump",
+                postgres_tools.file(f"/usr/lib/postgresql/{POSTGRES_MAJOR}/bin/pg_dump"),
+            )
+            .with_file(
+                "/usr/local/bin/pg_restore",
+                postgres_tools.file(f"/usr/lib/postgresql/{POSTGRES_MAJOR}/bin/pg_restore"),
+            )
         )
 
     def _test_base(self, source: dagger.Directory) -> dagger.Container:
@@ -404,17 +417,10 @@ class NbaDbCi:
             raise ValueError("backup-name must be a single new filename")
         backup_path = f"/backups/{backup_name}"
         promoted = (
-            self._base(source)
+            self._with_test_tools(self._base(source))
             .with_directory(f"{WORKDIR}/data", data)
             .with_secret_variable("PRODUCTION_DATABASE_URL", production_database_url)
             .with_env_variable("DAGGER_OPERATION_ID", operation_id)
-            .with_exec(
-                [
-                    "sh",
-                    "-c",
-                    "apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*",
-                ]
-            )
             .with_exec(["install", "-d", "-m", "700", "/backups"])
             .with_exec(
                 [

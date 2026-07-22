@@ -284,6 +284,13 @@ def test_season_metadata_counts_games_without_player_stats_and_handles_1990s(
     with etl_conn.cursor() as cur:
         cur.execute(
             """
+            INSERT INTO seasons (id, start_year, end_year)
+            VALUES (%s, 1998, 1999)
+            """,
+            (season,),
+        )
+        cur.execute(
+            """
             INSERT INTO games (
                 id, game_date, season, home_team_id, away_team_id, home_score, away_score
             ) VALUES (%s, '1998-11-01', %s, %s, %s, 100, 90)

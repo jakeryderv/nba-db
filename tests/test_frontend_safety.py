@@ -11,6 +11,7 @@ import pytest
 TEMPLATE = Path(__file__).parents[1] / "app" / "templates" / "index.html"
 SCRIPT = Path(__file__).parents[1] / "app" / "static" / "app.js"
 STYLES = Path(__file__).parents[1] / "app" / "static" / "styles.css"
+FAVICON = Path(__file__).parents[1] / "app" / "static" / "favicon.svg"
 
 
 def test_dynamic_actions_do_not_use_inline_javascript_handlers() -> None:
@@ -35,12 +36,14 @@ def test_assets_are_external_and_compatible_with_strict_csp() -> None:
     html = TEMPLATE.read_text()
 
     assert '<link rel="stylesheet" href="/static/styles.css">' in html
+    assert '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in html
     assert '<script src="/static/app.js" defer></script>' in html
     assert "<style" not in html
     assert not re.search(r"<script(?!\s+src=)", html)
     assert not re.search(r"\sstyle\s*=", html, re.IGNORECASE)
     assert SCRIPT.exists()
     assert STYLES.exists()
+    assert FAVICON.exists()
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
@@ -106,11 +109,16 @@ def test_shot_chart_is_accessible_and_uses_no_third_party_script() -> None:
     assert 'id="shot-chart-form"' in html
     assert 'aria-live="polite"' in html
     assert '<select class="filter-select" id="shot-game">' in html
+    assert 'id="shot-action-type"' in html
+    assert 'id="shot-home-away"' in html
+    assert 'id="shot-date-from"' in html
+    assert 'id="shot-date-to"' in html
     assert 'role="img" aria-label="Half-court shot chart"' in javascript
     assert 'role="img" aria-label="Shot density heatmap"' in javascript
     assert "frequency" in javascript
     assert "fg_pct_vs_league" in javascript
     assert "https://" not in javascript
+    assert "/api/shot-chart.csv?" in javascript
 
 
 def test_detail_dialogs_expose_accessible_names() -> None:

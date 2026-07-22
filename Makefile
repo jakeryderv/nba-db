@@ -1,12 +1,14 @@
-.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-promote require-season require-promotion test test-data clean seasons status lint format format-check docs typecheck check dagger-check api
+.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-stage season-promote require-season require-staging require-promotion live-check restore-drill test test-data clean seasons status lint format format-check docs typecheck check dagger-check api
 
 # Configuration
-SEASON ?=
+SEASON ?= 2025-26
 TARGET ?=
 CONFIRM_SEASON ?=
 CONFIRM_SINGLE_SEASON ?=
 BACKUP_FILE ?=
 API_URL ?=
+STAGING_API_URL ?=
+RESTORE_CONFIRM ?=
 
 # Default target
 help:
@@ -24,10 +26,13 @@ help:
 	@echo "  make db-shell    - Open psql shell"
 	@echo "  make db-logs     - View database logs"
 	@echo ""
-	@echo "Season Lifecycle (explicit SEASON=YYYY-YY required):"
+	@echo "Season Lifecycle (default: SEASON=2025-26):"
 	@echo "  make season-build       - Extract, transform, cross-check, and write manifest"
 	@echo "  make season-load-local  - Replace local DB with exactly the manifested season"
+	@echo "  make season-stage       - Replace and smoke-test an isolated staging environment"
 	@echo "  make season-promote     - Back up and replace production with typed confirmations"
+	@echo "  make live-check         - Verify deployed health, provenance, and core reads"
+	@echo "  make restore-drill      - Restore and verify a backup in a disposable database"
 	@echo ""
 	@echo "Data preparation:"
 	@echo "  make extract     - Download data from NBA API"
@@ -98,8 +103,14 @@ db-logs:
 
 # ETL Pipeline
 require-season:
-	@test -n "$(strip $(SEASON))" || (echo "ERROR: set an explicit SEASON=YYYY-YY" && exit 2)
 	@uv run python -m etl.season_lifecycle validate-season --season "$(SEASON)"
+
+require-staging: require-season
+	@test "$(TARGET)" = "staging" || (echo "ERROR: set TARGET=staging" && exit 2)
+	@test "$(CONFIRM_SEASON)" = "$(SEASON)" || (echo "ERROR: type CONFIRM_SEASON=$(SEASON)" && exit 2)
+	@test -n "$(strip $(STAGING_API_URL))" || (echo "ERROR: set STAGING_API_URL to the staging HTTPS URL" && exit 2)
+	@test "$(origin STAGING_DATABASE_URL)" != "command line" || (echo "ERROR: export STAGING_DATABASE_URL; do not pass it as a make argument" && exit 2)
+	@test -n "$$STAGING_DATABASE_URL" || (echo "ERROR: export STAGING_DATABASE_URL in the environment" && exit 2)
 
 require-promotion: require-season
 	@test "$(TARGET)" = "production" || (echo "ERROR: set TARGET=production" && exit 2)
@@ -129,6 +140,13 @@ season-build: require-season
 season-load-local: require-season
 	uv run python -m etl.season_lifecycle load-local --season "$(SEASON)"
 
+season-stage: require-staging
+	uv run python -m etl.season_lifecycle stage \
+		--season "$(SEASON)" \
+		--target "$(TARGET)" \
+		--confirm-season "$(CONFIRM_SEASON)" \
+		--api-url "$(STAGING_API_URL)"
+
 season-promote: require-promotion
 	uv run python -m etl.season_lifecycle promote \
 		--season "$(SEASON)" \
@@ -142,6 +160,16 @@ refresh: season-build
 	$(MAKE) season-load-local SEASON="$(SEASON)"
 	@echo "Local-only refresh completed; production requires season-promote."
 
+live-check: require-season
+	uv run python scripts/check_live.py --season "$(SEASON)" --api-url "$(API_URL)"
+
+restore-drill: require-season
+	@test -n "$(strip $(BACKUP_FILE))" || (echo "ERROR: set BACKUP_FILE to the archive to test" && exit 2)
+	@test -n "$(strip $(RESTORE_CONFIRM))" || (echo "ERROR: type RESTORE_CONFIRM='RESTORE <name>_recovery'" && exit 2)
+	@test "$(origin RECOVERY_DATABASE_URL)" != "command line" || (echo "ERROR: export RECOVERY_DATABASE_URL; do not pass it as a make argument" && exit 2)
+	@test -n "$$RECOVERY_DATABASE_URL" || (echo "ERROR: export RECOVERY_DATABASE_URL" && exit 2)
+	uv run python scripts/restore_drill.py --season "$(SEASON)" --backup-file "$(BACKUP_FILE)" --confirm "$(RESTORE_CONFIRM)"
+
 # Info commands
 seasons:
 	@docker compose exec db psql -U nba_user -d nba_db -c "SELECT id AS season, games_count, players_count, loaded_at FROM seasons ORDER BY id DESC;" 2>/dev/null || echo "Database not running"
@@ -154,20 +182,20 @@ test-data:
 	PYTHONPATH=. uv run python db/tests/test_data_quality.py
 
 lint:
-	uv run ruff check etl/ app/ db/ scripts/ tests/ .dagger/src/
+	uv run ruff check etl/ app/ db/ scripts/ tests/ .dagger/src/ nba_config.py
 
 format:
-	uv run ruff format etl/ app/ db/ scripts/ tests/ .dagger/src/
-	uv run ruff check --fix etl/ app/ db/ scripts/ tests/ .dagger/src/
+	uv run ruff format etl/ app/ db/ scripts/ tests/ .dagger/src/ nba_config.py
+	uv run ruff check --fix etl/ app/ db/ scripts/ tests/ .dagger/src/ nba_config.py
 
 format-check:
-	uv run ruff format --check etl/ app/ db/ scripts/ tests/ .dagger/src/
+	uv run ruff format --check etl/ app/ db/ scripts/ tests/ .dagger/src/ nba_config.py
 
 docs:
 	uv run python scripts/check_docs.py
 
 typecheck:
-	uv run mypy etl/ app/ db/ scripts/
+	uv run mypy etl/ app/ db/ scripts/ nba_config.py
 
 # API
 api:

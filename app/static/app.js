@@ -1,4 +1,4 @@
-let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready = false, activeSection = 'standings', shotGamesRequest = 0;
+let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], shotActionTypes = [], ready = false, activeSection = 'standings', shotGamesRequest = 0;
         const page = { players: {o:0,l:50,t:0}, games: {o:0,l:24,t:0} };
         const sections = new Set(['standings', 'leaders', 'games', 'shots', 'players', 'compare']);
 
@@ -96,6 +96,13 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 if (!seasons.length) throw new Error('No season is loaded');
                 season = seasons[0].id;
                 document.getElementById('season-label').textContent = `${season} Regular Season`;
+                const dataset = await api(`/api/dataset-status?${new URLSearchParams({season})}`);
+                const datasetStatus = document.getElementById('dataset-status');
+                const verified = dataset.verification_status === 'passed';
+                datasetStatus.classList.toggle('verified', verified);
+                datasetStatus.title = verified && dataset.verified_at
+                    ? `Officially verified ${new Date(dataset.verified_at).toLocaleString()} · ${dataset.counts.shot_attempts.toLocaleString()} shots`
+                    : `Loaded ${new Date(dataset.loaded_at).toLocaleString()} · verification metadata unavailable`;
 
                 teams = await api('/api/teams');
                 const teamSelect = document.getElementById('games-team');
@@ -111,9 +118,11 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
 
                 comparisonPlayers = (await api('/api/players?active=true&limit=500')).data;
                 shotPlayers = await api(`/api/shot-chart/players?${new URLSearchParams({season})}`);
+                shotActionTypes = await api(`/api/shot-chart/action-types?${new URLSearchParams({season})}`);
                 populateComparisonSelects();
                 populateShotSelectors();
                 populateShotOpponents();
+                populateShotActionTypes();
 
                 ready = true;
                 if (!window.location.hash) history.replaceState(null, '', '#standings');
@@ -265,6 +274,19 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
             }));
         }
 
+        function populateShotActionTypes() {
+            const select = document.getElementById('shot-action-type');
+            const prompt = document.createElement('option');
+            prompt.value = '';
+            prompt.textContent = 'All actions';
+            select.replaceChildren(prompt, ...shotActionTypes.map(action => {
+                const option = document.createElement('option');
+                option.value = action;
+                option.textContent = action;
+                return option;
+            }));
+        }
+
         async function populateShotGames(selected = null) {
             const request = ++shotGamesRequest;
             const select = document.getElementById('shot-game');
@@ -329,7 +351,11 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 opponent_id: 'shot-opponent',
                 period: 'shot-period',
                 made: 'shot-result',
-                shot_type: 'shot-type'
+                shot_type: 'shot-type',
+                action_type: 'shot-action-type',
+                home_away: 'shot-home-away',
+                date_from: 'shot-date-from',
+                date_to: 'shot-date-to'
             };
             Object.entries(controls).forEach(([key, control]) => {
                 document.getElementById(control).value = filters.get(key) || '';
@@ -343,6 +369,10 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                 period: document.getElementById('shot-period').value,
                 made: document.getElementById('shot-result').value,
                 shot_type: document.getElementById('shot-type').value,
+                action_type: document.getElementById('shot-action-type').value,
+                home_away: document.getElementById('shot-home-away').value,
+                date_from: document.getElementById('shot-date-from').value,
+                date_to: document.getElementById('shot-date-to').value,
                 game_id: document.getElementById('shot-game').value.trim()
             };
             Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
@@ -362,9 +392,16 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
         function shotParams(type, id) {
             const params = shotFilterParams();
             params.set('season', season);
-            params.set('max_points', '10000');
+            params.set('max_points', '2500');
             params.set(type === 'player' ? 'player_id' : 'team_id', id);
             return params;
+        }
+
+        function shotExportUrl(type, id) {
+            const params = shotFilterParams();
+            params.set('season', season);
+            params.set(type === 'player' ? 'player_id' : 'team_id', id);
+            return `/api/shot-chart.csv?${params}`;
         }
 
         function subjectName(type, id) {
@@ -377,9 +414,22 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
             showLoading(result, 'shot chart');
             try {
                 const ids = comparison ? [id, comparison] : [id];
-                const charts = await Promise.all(ids.map(value => api(`/api/shot-chart?${shotParams(type, value)}`)));
+                const bundles = await Promise.all(ids.map(async value => {
+                    const params = shotParams(type, value);
+                    params.delete('max_points');
+                    const [chart, profile] = await Promise.all([
+                        api(`/api/shot-chart?${shotParams(type, value)}`),
+                        api(`/api/shot-profile?${params}`)
+                    ]);
+                    return {chart, profile};
+                }));
+                const charts = bundles.map(bundle => bundle.chart);
+                const profiles = bundles.map(bundle => bundle.profile);
                 const names = ids.map(value => subjectName(type, value));
                 result.innerHTML = `
+                    <div class="shot-actions">${ids.map((value, index) => `
+                        <a class="secondary-button" href="${h(shotExportUrl(type, value))}" download>Download ${h(names[index])} CSV</a>
+                    `).join('')}</div>
                     <div class="shot-summary-grid">${charts.map((chart, index) => `
                         <div class="shot-summary shot-series-${index + 1}">
                             <h3>${h(names[index])}</h3>
@@ -391,7 +441,24 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                         ${shotCourt(charts, names)}
                         ${shotHeatmap(charts, names)}
                     </div>
-                    ${shotZoneTable(charts, names)}`;
+                    ${shotInsights(profiles, names)}
+                    ${shotProfileTable('Five-zone profile', profiles, names, 'zones')}
+                    <div class="shot-split-grid">
+                        ${shotProfileTable('Home / away', profiles, names, 'venue_splits')}
+                        ${shotProfileTable('Season phase', profiles, names, 'season_phase_splits')}
+                    </div>
+                    <details class="shot-profile-details">
+                        <summary>Monthly splits</summary>
+                        ${shotProfileTable('', profiles, names, 'month_splits')}
+                    </details>
+                    <details class="shot-profile-details">
+                        <summary>Opponent splits</summary>
+                        ${shotProfileTable('', profiles, names, 'opponent_splits')}
+                    </details>
+                    <details class="shot-profile-details">
+                        <summary>Detailed NBA zones</summary>
+                        ${shotZoneTable(charts, names)}
+                    </details>`;
             } catch (error) {
                 showError(result, 'shot chart', error);
             }
@@ -467,6 +534,42 @@ let season = null, teams = [], comparisonPlayers = [], shotPlayers = [], ready =
                     }).join('')}</tr>`;
                 }).join('')}</tbody>
             </table></div></div>`;
+        }
+
+        function shotInsights(profiles, names) {
+            const cards = profiles.flatMap((profile, index) => [
+                ['Best area', profile.best_area],
+                ['Lowest efficiency', profile.lowest_area]
+            ].filter(([, row]) => row).map(([title, row]) => `
+                <article class="shot-insight shot-series-${index + 1}">
+                    <span>${h(names[index])} · ${h(title)}</span>
+                    <strong>${h(row.label)}</strong>
+                    <small>${h(row.makes)}/${h(row.attempts)} · ${h(pct(row.efg_pct))} eFG · ${h(present(row.points_per_shot))} PPS</small>
+                </article>
+            `));
+            return cards.length ? `<div class="shot-insights">${cards.join('')}</div>` : '';
+        }
+
+        function shotProfileTable(title, profiles, names, key) {
+            const labels = [...new Set(profiles.flatMap(profile => profile[key].map(row => row.label)))];
+            if (!labels.length) return '';
+            const maps = profiles.map(profile => new Map(profile[key].map(row => [row.label, row])));
+            return `<section class="shot-profile-section">
+                ${title ? `<h3>${h(title)}</h3>` : ''}
+                <div class="table-container"><div class="table-scroll"><table>
+                    <thead><tr><th>Split</th>${names.map(name => `<th>${h(name)}</th>`).join('')}</tr></thead>
+                    <tbody>${labels.map(label => `<tr>
+                        <td><strong>${h(label)}</strong></td>
+                        ${maps.map(map => {
+                            const row = map.get(label);
+                            return `<td class="num">${row ? `
+                                <strong>${h(row.makes)}/${h(row.attempts)} · ${h(pct(row.fg_pct))}</strong><br>
+                                <span class="detail-meta">${h(pct(row.frequency))} frequency · ${h(pct(row.efg_pct))} eFG · ${h(present(row.points_per_shot))} PPS</span>
+                            ` : '-'}</td>`;
+                        }).join('')}
+                    </tr>`).join('')}</tbody>
+                </table></div></div>
+            </section>`;
         }
 
         function navigateComparison(type) {

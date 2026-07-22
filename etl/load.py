@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""
-NBA Data Load Script
-Loads clean CSVs into PostgreSQL database.
+"""Legacy loading helpers retained for migration tests.
 
-Usage:
-    python load.py                    # Default season (2024-25)
-    python load.py --season 2023-24   # Specific season
+The executable loader was retired because it bypassed manifested-dataset
+verification and did not load the complete shot-attempt dataset. Supported
+loads go through ``python -m etl.season_lifecycle``.
 """
 
-import argparse
 import os
 import sys
 
@@ -24,8 +21,6 @@ sys.path.insert(0, PROJECT_ROOT)
 from db.config import get_db_config
 
 BASE_CLEAN_DIR = os.path.join(PROJECT_ROOT, "data", "clean")
-DEFAULT_SEASON = "2024-25"
-
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 
@@ -408,39 +403,34 @@ def update_season_metadata(conn, season):
     print(f"    Updated metadata for {season}")
 
 
+def ensure_season_row(conn, season):
+    """Create the parent season row required by current relational constraints."""
+    start_year = int(season[:4])
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO seasons (id, start_year, end_year)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (season, start_year, start_year + 1),
+        )
+
+
 def load_season(conn, season):
     """Load shared and season data atomically."""
     with conn.transaction():
         load_teams(conn)
         load_players(conn)
+        ensure_season_row(conn, season)
         load_games(conn, season)
         load_team_game_stats(conn, season)
         load_player_game_stats(conn, season)
         update_season_metadata(conn, season)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Load NBA data into database")
-    parser.add_argument(
-        "--season", default=DEFAULT_SEASON, help=f"Season (default: {DEFAULT_SEASON})"
-    )
-    args = parser.parse_args()
-
-    season = args.season
-    print("=" * 50)
-    print(f"NBA Data Load - Season {season}")
-    print("=" * 50)
-
-    conn = get_connection()
-    try:
-        load_season(conn, season)
-    finally:
-        conn.close()
-
-    print("\n" + "=" * 50)
-    print("Load complete!")
-    print("=" * 50)
-
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        "Direct loading is disabled. Use `make season-load-local SEASON=2025-26` "
+        "or the guarded season promotion workflow."
+    )

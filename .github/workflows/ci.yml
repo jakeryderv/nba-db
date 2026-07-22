@@ -58,3 +58,21 @@ jobs:
           version: "0.21.7"
           verb: call
           args: dependency-audit --source=. --audit-key=${{ github.run_id }}
+
+  live-health:
+    if: github.event_name == 'schedule' && vars.LIVE_API_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Verify the deployed 2025-26 product
+        env:
+          LIVE_API_URL: ${{ vars.LIVE_API_URL }}
+          EXPECTED_GAMES: "1230"
+          EXPECTED_SHOT_ATTEMPTS: "219160"
+        run: uv run --locked python scripts/check_live.py

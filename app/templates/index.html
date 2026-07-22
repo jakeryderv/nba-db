@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NBA Stats</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -16,6 +17,7 @@
             <div class="season-display" aria-label="Loaded dataset">
                 <span class="season-display-label">Dataset</span>
                 <span id="season-label">Loading…</span>
+                <span id="dataset-status" class="dataset-status" aria-label="Dataset verification status"></span>
             </div>
         </div>
     </header>
@@ -158,6 +160,26 @@
                         <option value="2PT Field Goal">2PT</option>
                         <option value="3PT Field Goal">3PT</option>
                     </select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-action-type">Action</label>
+                    <select class="filter-select" id="shot-action-type"><option value="">All actions</option></select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-home-away">Venue</label>
+                    <select class="filter-select" id="shot-home-away">
+                        <option value="">Home and away</option>
+                        <option value="home">Home</option>
+                        <option value="away">Away</option>
+                    </select>
+                </div>
+                <div class="compare-field">
+                    <label for="shot-date-from">From</label>
+                    <input class="filter-select" id="shot-date-from" type="date">
+                </div>
+                <div class="compare-field">
+                    <label for="shot-date-to">Through</label>
+                    <input class="filter-select" id="shot-date-to" type="date">
                 </div>
                 <div class="compare-field">
                     <label for="shot-game">Game</label>

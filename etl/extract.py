@@ -11,14 +11,15 @@ Endpoints used:
 - ShotChartDetail - League-wide shot attempts and court locations
 
 Usage:
-    python extract.py                    # Default season (2024-25)
-    python extract.py --season 2023-24   # Specific season
+    python extract.py                    # Verified product default
+    python extract.py --season 2025-26   # Explicit season
 """
 
 import argparse
 import json
 import os
 import re
+import sys
 import time
 
 from nba_api.stats.endpoints import CommonAllPlayers, LeagueGameLog, ShotChartDetail
@@ -27,8 +28,12 @@ from nba_api.stats.static import teams
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from nba_config import DEFAULT_SEASON  # noqa: E402
+
 BASE_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
-DEFAULT_SEASON = "2024-25"
 SEASON_TYPE = "Regular Season"
 REQUEST_DELAY = 0.6
 SEASON_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")

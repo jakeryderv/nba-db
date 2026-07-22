@@ -868,6 +868,31 @@ def test_production_config_requires_explicit_nonlocal_url(monkeypatch: pytest.Mo
         lifecycle.production_db_config("production", SEASON, "2024-25")
 
 
+def test_staging_config_requires_distinct_explicit_nonlocal_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("STAGING_DATABASE_URL", raising=False)
+    with pytest.raises(lifecycle.PromotionSafetyError, match="STAGING_DATABASE_URL"):
+        lifecycle.staging_db_config("staging", SEASON, SEASON)
+
+    monkeypatch.setenv("STAGING_DATABASE_URL", "postgresql://owner:secret@localhost/nba")
+    with pytest.raises(lifecycle.PromotionSafetyError, match="local"):
+        lifecycle.staging_db_config("staging", SEASON, SEASON)
+
+    staging_url = "postgresql://owner:secret@staging-db.example.com/nba"
+    monkeypatch.setenv("STAGING_DATABASE_URL", staging_url)
+    monkeypatch.setenv("PRODUCTION_DATABASE_URL", staging_url)
+    with pytest.raises(lifecycle.PromotionSafetyError, match="must be different"):
+        lifecycle.staging_db_config("staging", SEASON, SEASON)
+
+    monkeypatch.setenv(
+        "PRODUCTION_DATABASE_URL", "postgresql://owner:secret@production-db.example.com/nba"
+    )
+    assert lifecycle.staging_db_config("staging", SEASON, SEASON)["host"] == (
+        "staging-db.example.com"
+    )
+
+
 def test_ordinary_database_url_cannot_authorize_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1114,6 +1139,23 @@ class FakeResponse:
 def smoke_response(url: str, *, listed_game_id: str = GAME_ID) -> FakeResponse:
     if url.endswith("/health"):
         return FakeResponse({"status": "healthy", "database": "connected"})
+    if url.endswith("/ready"):
+        return FakeResponse(
+            {
+                "status": "ready",
+                "season": SEASON,
+                "verification_status": "passed",
+                "counts": {"games": 1, "players": 2, "shot_attempts": 160},
+            }
+        )
+    if url.endswith("/api/dataset-status"):
+        return FakeResponse(
+            {
+                "verification_status": "passed",
+                "manifest_sha256": None,
+                "counts": {"shot_attempts": 160},
+            }
+        )
     if url.endswith("/api/seasons"):
         return FakeResponse([{"id": SEASON, "games_count": 1}])
     if url.endswith(f"/api/games/{GAME_ID}/boxscore"):
@@ -1150,8 +1192,34 @@ def test_live_api_smoke_is_bounded_and_checks_counts(valid_root: Path) -> None:
         "https://api.example.com/", dataset, get=get, attempts=1, sleep=lambda _seconds: None
     )
 
-    assert len(calls) == 6
+    assert len(calls) == 8
     assert calls[0] == "https://api.example.com/health"
+
+
+def test_live_api_smoke_counts_participants_not_unused_catalog_players(
+    valid_root: Path,
+) -> None:
+    players_path = valid_root / "shared/players.csv"
+    players = pd.read_csv(players_path)
+    players.loc[len(players)] = {
+        "id": 1003,
+        "full_name": "Unused Player",
+        "first_name": "Unused",
+        "last_name": "Player",
+        "is_active": True,
+    }
+    players.to_csv(players_path, index=False)
+    dataset = lifecycle.load_validated_dataset(valid_root, SEASON)
+
+    assert dataset.counts["players"] == 3
+    assert dataset.participating_players_count == 2
+    lifecycle.verify_live_api(
+        "https://api.example.com",
+        dataset,
+        get=lambda url, **_kwargs: smoke_response(url),
+        attempts=1,
+        sleep=lambda _seconds: None,
+    )
 
 
 def test_live_api_smoke_retries_transient_failures(valid_root: Path) -> None:
@@ -1174,7 +1242,7 @@ def test_live_api_smoke_retries_transient_failures(valid_root: Path) -> None:
         sleep=sleeps.append,
     )
 
-    assert calls == 7
+    assert calls == 9
     assert sleeps == [2]
 
 

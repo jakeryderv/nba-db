@@ -1,17 +1,25 @@
 """NBA Database API - FastAPI Application."""
 
+import csv
+import io
 import logging
 import mimetypes
+import re
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.db import close_pool, get_cursor
 from app.models import (
+    DatasetCounts,
+    DatasetStatus,
     GameBoxScore,
     GameDetail,
     GameList,
@@ -27,6 +35,8 @@ from app.models import (
     Season,
     ShotAttempt,
     ShotChart,
+    ShotProfile,
+    ShotProfileRow,
     ShotZoneSummary,
     StatLeader,
     Team,
@@ -39,6 +49,7 @@ from app.models import (
     TeamSeasonSummary,
     TeamStanding,
 )
+from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +78,45 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.middleware("http")
 async def add_cache_headers(request: Request, call_next):
-    response = await call_next(request)
+    started = perf_counter()
+    supplied_request_id = request.headers.get("X-Request-ID", "")
+    request_id = (
+        supplied_request_id
+        if re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", supplied_request_id)
+        else uuid4().hex
+    )
+    request.state.request_id = request_id
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "Unhandled request request_id=%s method=%s path=%s",
+            request_id,
+            request.method,
+            request.url.path,
+        )
+        raise
+    elapsed_ms = (perf_counter() - started) * 1000
+    response.headers["X-Request-ID"] = request_id
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+    if elapsed_ms >= 1000:
+        logger.warning(
+            "Slow request method=%s path=%s duration_ms=%.1f status=%s",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+            response.status_code,
+        )
+    else:
+        logger.info(
+            "Request request_id=%s method=%s path=%s duration_ms=%.1f status=%s",
+            request_id,
+            request.method,
+            request.url.path,
+            elapsed_ms,
+            response.status_code,
+        )
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; script-src 'self'; style-src 'self'; "
         "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
@@ -112,6 +161,50 @@ def health_check() -> dict:
         raise HTTPException(status_code=503, detail="Database unavailable") from exc
 
 
+@app.get("/ready", tags=["Health"])
+def readiness_check() -> dict:
+    """Confirm that the verified default dataset is complete and queryable."""
+    try:
+        with get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.id AS season, s.verification_status,
+                       s.games_count, s.players_count, s.shot_attempts_count,
+                       (SELECT COUNT(*) FROM games WHERE season = s.id) AS live_games,
+                       (SELECT COUNT(DISTINCT player_id)
+                        FROM player_game_stats WHERE season = s.id) AS live_players,
+                       (SELECT COUNT(*) FROM shot_attempts WHERE season = s.id) AS live_shots
+                FROM seasons s
+                WHERE s.id = %s
+                """,
+                (DEFAULT_SEASON,),
+            )
+            row = cur.fetchone()
+        if (
+            not row
+            or row["verification_status"] != "passed"
+            or row["games_count"] != row["live_games"]
+            or row["players_count"] != row["live_players"]
+            or row["shot_attempts_count"] != row["live_shots"]
+        ):
+            raise HTTPException(status_code=503, detail="Verified dataset is not ready")
+        return {
+            "status": "ready",
+            "season": row["season"],
+            "verification_status": row["verification_status"],
+            "counts": {
+                "games": row["live_games"],
+                "players": row["live_players"],
+                "shot_attempts": row["live_shots"],
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail="Readiness check failed") from exc
+
+
 # === Seasons ===
 
 
@@ -120,6 +213,57 @@ def list_seasons() -> list[Season]:
     with get_cursor() as cur:
         cur.execute("SELECT * FROM seasons ORDER BY id DESC")
         return [Season(**row) for row in cur.fetchall()]
+
+
+@app.get("/api/dataset-status", response_model=DatasetStatus, tags=["Seasons"])
+def get_dataset_status(
+    season: str = Query(DEFAULT_SEASON, description="Season"),
+) -> DatasetStatus:
+    """Return public freshness, verification, and row-count metadata."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                s.id AS season,
+                s.loaded_at,
+                s.manifest_generated_at,
+                s.verified_at,
+                s.verification_status,
+                s.manifest_sha256,
+                s.games_count AS games,
+                s.players_count AS players,
+                (SELECT COUNT(*) FROM team_game_stats WHERE season = s.id)
+                    AS team_game_stats,
+                (SELECT COUNT(*) FROM player_game_stats WHERE season = s.id)
+                    AS player_game_stats,
+                (SELECT COUNT(*) FROM shot_attempts WHERE season = s.id)
+                    AS shot_attempts
+            FROM seasons s
+            WHERE s.id = %s
+            """,
+            (season,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        count_keys = (
+            "games",
+            "players",
+            "team_game_stats",
+            "player_game_stats",
+            "shot_attempts",
+        )
+        return DatasetStatus(
+            season=row["season"],
+            season_type="Regular Season",
+            is_default=row["season"] == DEFAULT_SEASON,
+            loaded_at=row["loaded_at"],
+            manifest_generated_at=row["manifest_generated_at"],
+            verified_at=row["verified_at"],
+            verification_status=row["verification_status"],
+            manifest_sha256=(row["manifest_sha256"].strip() if row["manifest_sha256"] else None),
+            counts=DatasetCounts(**{key: row[key] for key in count_keys}),
+        )
 
 
 # === Teams ===
@@ -144,7 +288,7 @@ def get_team(team_id: int) -> Team:
 
 @app.get("/api/teams/{team_id}/stats", response_model=TeamSeasonSummary, tags=["Teams"])
 def get_team_season_stats(
-    team_id: int, season: str = Query(..., description="Season (required)")
+    team_id: int, season: str = Query(DEFAULT_SEASON, description="Season")
 ) -> TeamSeasonSummary:
     with get_cursor() as cur:
         cur.execute(
@@ -237,7 +381,7 @@ def get_team_season_stats(
 )
 def get_team_players(
     team_id: int,
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     limit: int = Query(15, ge=1, le=50),
 ) -> TeamPlayerSummaryList:
     with get_cursor() as cur:
@@ -365,7 +509,7 @@ def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
 @app.get("/api/players/{player_id}/games", response_model=PlayerGameLog, tags=["Players"])
 def get_player_games(
     player_id: int,
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> PlayerGameLog:
@@ -424,11 +568,80 @@ def get_player_games(
 
 
 ShotType = Literal["2PT Field Goal", "3PT Field Goal"]
+HomeAway = Literal["home", "away"]
+
+
+def _shot_query_parts(
+    *,
+    season: str,
+    subject_column: str,
+    subject_id: int,
+    game_id: str | None,
+    opponent_id: int | None,
+    period: int | None,
+    shot_type: ShotType | None,
+    action_type: str | None,
+    home_away: HomeAway | None,
+    date_from: date | None,
+    date_to: date | None,
+    made: bool | None,
+) -> tuple[str, list[object], str, list[object], str]:
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must not be after date_to")
+    context_conditions = ["sa.season = %s"]
+    context_params: list[object] = [season]
+    for value, clause in (
+        (game_id, "sa.game_id = %s"),
+        (opponent_id, "opponent.id = %s"),
+        (period, "sa.period = %s"),
+        (shot_type, "sa.shot_type = %s"),
+        (action_type, "sa.action_type = %s"),
+        (date_from, "g.game_date >= %s"),
+        (date_to, "g.game_date <= %s"),
+    ):
+        if value is not None:
+            context_conditions.append(clause)
+            context_params.append(value)
+    if home_away == "home":
+        context_conditions.append("g.home_team_id = sa.team_id")
+    elif home_away == "away":
+        context_conditions.append("g.away_team_id = sa.team_id")
+
+    conditions = [*context_conditions, f"{subject_column} = %s"]
+    params = [*context_params, subject_id]
+    if made is not None:
+        conditions.append("sa.shot_made = %s")
+        params.append(made)
+    joins = """
+        FROM shot_attempts sa
+        JOIN players p ON p.id = sa.player_id
+        JOIN teams team ON team.id = sa.team_id
+        JOIN games g ON g.id = sa.game_id
+        JOIN teams opponent ON opponent.id = CASE
+            WHEN g.home_team_id = sa.team_id THEN g.away_team_id ELSE g.home_team_id
+        END
+    """
+    return (
+        " AND ".join(conditions),
+        params,
+        " AND ".join(context_conditions),
+        context_params,
+        joins,
+    )
+
+
+def _shot_subject(player_id: int | None, team_id: int | None) -> tuple[str, int, str, str]:
+    if (player_id is None) == (team_id is None):
+        raise HTTPException(status_code=422, detail="Provide exactly one player_id or team_id")
+    if player_id is not None:
+        return "player", player_id, "sa.player_id", "players"
+    assert team_id is not None
+    return "team", team_id, "sa.team_id", "teams"
 
 
 @app.get("/api/shot-chart/players", response_model=list[Player], tags=["Shot Charts"])
 def list_shot_chart_players(
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
 ) -> list[Player]:
     """List only players who have shot attempts in the selected season."""
     with get_cursor() as cur:
@@ -447,9 +660,27 @@ def list_shot_chart_players(
         return [Player(**row) for row in cur.fetchall()]
 
 
+@app.get("/api/shot-chart/action-types", response_model=list[str], tags=["Shot Charts"])
+def list_shot_action_types(
+    season: str = Query(DEFAULT_SEASON, description="Season"),
+) -> list[str]:
+    """List action types present in the verified season."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT action_type
+            FROM shot_attempts
+            WHERE season = %s
+            ORDER BY action_type
+            """,
+            (season,),
+        )
+        return [row["action_type"] for row in cur.fetchall()]
+
+
 @app.get("/api/shot-chart/games", response_model=list[GameDetail], tags=["Shot Charts"])
 def list_shot_chart_games(
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     player_id: int | None = Query(None, description="Player subject"),
     team_id: int | None = Query(None, description="Team subject"),
 ) -> list[GameDetail]:
@@ -483,9 +714,102 @@ def list_shot_chart_games(
         return [GameDetail(**row) for row in cur.fetchall()]
 
 
+@app.get("/api/shot-chart.csv", tags=["Shot Charts"])
+def export_shot_chart_csv(
+    season: str = Query(DEFAULT_SEASON, description="Season"),
+    player_id: int | None = Query(None),
+    team_id: int | None = Query(None),
+    game_id: str | None = Query(None),
+    opponent_id: int | None = Query(None),
+    period: int | None = Query(None, ge=1, le=20),
+    made: bool | None = Query(None),
+    shot_type: Annotated[ShotType | None, Query()] = None,
+    action_type: str | None = Query(None, max_length=100),
+    home_away: Annotated[HomeAway | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+) -> Response:
+    """Download every matching attempt for one player or team as CSV."""
+    subject_type, subject_id, subject_column, entity_table = _shot_subject(player_id, team_id)
+    where_clause, params, _, _, joins = _shot_query_parts(
+        season=season,
+        subject_column=subject_column,
+        subject_id=subject_id,
+        game_id=game_id,
+        opponent_id=opponent_id,
+        period=period,
+        shot_type=shot_type,
+        action_type=action_type,
+        home_away=home_away,
+        date_from=date_from,
+        date_to=date_to,
+        made=made,
+    )
+    with get_cursor() as cur:
+        cur.execute(f"SELECT 1 FROM {entity_table} WHERE id = %s", (subject_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"{subject_type.title()} not found")
+        cur.execute(
+            f"""
+            SELECT g.game_date, sa.game_id, sa.event_id, sa.player_id,
+                   p.full_name AS player_name, sa.team_id, team.abbreviation AS team_abbr,
+                   opponent.id AS opponent_id, opponent.abbreviation AS opponent_abbr,
+                   sa.season, sa.period, sa.minutes_remaining, sa.seconds_remaining,
+                   sa.action_type, sa.shot_type, sa.zone_basic, sa.zone_area,
+                   sa.zone_range, sa.shot_distance, sa.loc_x, sa.loc_y, sa.shot_made
+            {joins}
+            WHERE {where_clause}
+            ORDER BY g.game_date, sa.game_id, sa.event_id
+            LIMIT 20001
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+    if len(rows) > 20000:
+        raise HTTPException(status_code=413, detail="CSV export exceeds the 20,000-row limit")
+    output = io.StringIO()
+    fieldnames = (
+        list(rows[0])
+        if rows
+        else [
+            "game_date",
+            "game_id",
+            "event_id",
+            "player_id",
+            "player_name",
+            "team_id",
+            "team_abbr",
+            "opponent_id",
+            "opponent_abbr",
+            "season",
+            "period",
+            "minutes_remaining",
+            "seconds_remaining",
+            "action_type",
+            "shot_type",
+            "zone_basic",
+            "zone_area",
+            "zone_range",
+            "shot_distance",
+            "loc_x",
+            "loc_y",
+            "shot_made",
+        ]
+    )
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    filename = f"{season}-{subject_type}-{subject_id}-shots.csv"
+    return Response(
+        output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/shot-chart", response_model=ShotChart, tags=["Shot Charts"])
 def get_shot_chart(
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     player_id: int | None = Query(None, description="Player subject"),
     team_id: int | None = Query(None, description="Team subject"),
     game_id: str | None = Query(None),
@@ -493,48 +817,29 @@ def get_shot_chart(
     period: int | None = Query(None, ge=1, le=20),
     made: bool | None = Query(None),
     shot_type: Annotated[ShotType | None, Query()] = None,
-    max_points: int = Query(10000, ge=100, le=10000),
+    action_type: str | None = Query(None, max_length=100),
+    home_away: Annotated[HomeAway | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    max_points: int = Query(2500, ge=100, le=10000),
 ) -> ShotChart:
     """Return bounded shot locations plus complete zone aggregates for one subject."""
-    if (player_id is None) == (team_id is None):
-        raise HTTPException(status_code=422, detail="Provide exactly one player_id or team_id")
-
-    subject_type = "player" if player_id is not None else "team"
-    subject_id = player_id if player_id is not None else team_id
-    assert subject_id is not None
-    subject_column = "sa.player_id" if player_id is not None else "sa.team_id"
-    context_conditions = ["sa.season = %s"]
-    context_params: list[object] = [season]
-
-    for value, clause in (
-        (game_id, "sa.game_id = %s"),
-        (opponent_id, "opponent.id = %s"),
-        (period, "sa.period = %s"),
-        (shot_type, "sa.shot_type = %s"),
-    ):
-        if value is not None:
-            context_conditions.append(clause)
-            context_params.append(value)
-
-    conditions = [*context_conditions, f"{subject_column} = %s"]
-    params = [*context_params, subject_id]
-    if made is not None:
-        conditions.append("sa.shot_made = %s")
-        params.append(made)
-
-    where_clause = " AND ".join(conditions)
-    context_where_clause = " AND ".join(context_conditions)
-    joins = """
-        FROM shot_attempts sa
-        JOIN players p ON p.id = sa.player_id
-        JOIN teams team ON team.id = sa.team_id
-        JOIN games g ON g.id = sa.game_id
-        JOIN teams opponent ON opponent.id = CASE
-            WHEN g.home_team_id = sa.team_id THEN g.away_team_id ELSE g.home_team_id
-        END
-    """
+    subject_type, subject_id, subject_column, entity_table = _shot_subject(player_id, team_id)
+    where_clause, params, context_where_clause, context_params, joins = _shot_query_parts(
+        season=season,
+        subject_column=subject_column,
+        subject_id=subject_id,
+        game_id=game_id,
+        opponent_id=opponent_id,
+        period=period,
+        shot_type=shot_type,
+        action_type=action_type,
+        home_away=home_away,
+        date_from=date_from,
+        date_to=date_to,
+        made=made,
+    )
     with get_cursor() as cur:
-        entity_table = "players" if player_id is not None else "teams"
         cur.execute(f"SELECT 1 FROM {entity_table} WHERE id = %s", (subject_id,))
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail=f"{subject_type.title()} not found")
@@ -589,7 +894,7 @@ def get_shot_chart(
                    opponent.id AS opponent_id, opponent.abbreviation AS opponent_abbr
             {joins}
             WHERE {where_clause}
-            ORDER BY g.game_date, sa.game_id, sa.event_id
+            ORDER BY md5(sa.game_id || ':' || sa.event_id::TEXT)
             LIMIT %s
             """,
             [*params, max_points],
@@ -690,6 +995,175 @@ def get_shot_chart(
     )
 
 
+@app.get("/api/shot-profile", response_model=ShotProfile, tags=["Shot Charts"])
+def get_shot_profile(
+    season: str = Query(DEFAULT_SEASON, description="Season"),
+    player_id: int | None = Query(None, description="Player subject"),
+    team_id: int | None = Query(None, description="Team subject"),
+    game_id: str | None = Query(None),
+    opponent_id: int | None = Query(None),
+    period: int | None = Query(None, ge=1, le=20),
+    made: bool | None = Query(None),
+    shot_type: Annotated[ShotType | None, Query()] = None,
+    action_type: str | None = Query(None, max_length=100),
+    home_away: Annotated[HomeAway | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+) -> ShotProfile:
+    """Summarize one subject by normalized area and within-season splits."""
+    subject_type, subject_id, subject_column, entity_table = _shot_subject(player_id, team_id)
+    where_clause, params, _, _, joins = _shot_query_parts(
+        season=season,
+        subject_column=subject_column,
+        subject_id=subject_id,
+        game_id=game_id,
+        opponent_id=opponent_id,
+        period=period,
+        shot_type=shot_type,
+        action_type=action_type,
+        home_away=home_away,
+        date_from=date_from,
+        date_to=date_to,
+        made=made,
+    )
+    break_end = ALL_STAR_BREAK_END.get(season)
+    if break_end is None:
+        try:
+            break_end = date(int(season[:4]) + 1, 2, 16)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Invalid season") from None
+
+    with get_cursor() as cur:
+        cur.execute(f"SELECT 1 FROM {entity_table} WHERE id = %s", (subject_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"{subject_type.title()} not found")
+        cur.execute(
+            f"""
+            WITH filtered AS MATERIALIZED (
+                SELECT sa.shot_made, sa.shot_type, g.game_date,
+                       opponent.full_name AS opponent_name,
+                       CASE WHEN g.home_team_id = sa.team_id THEN 'Home' ELSE 'Away' END
+                           AS venue,
+                       CASE
+                           WHEN sa.zone_basic = 'Restricted Area' THEN 'Rim'
+                           WHEN sa.zone_basic = 'In The Paint (Non-RA)' THEN 'Paint'
+                           WHEN sa.zone_basic = 'Mid-Range' THEN 'Midrange'
+                           WHEN sa.zone_basic IN ('Left Corner 3', 'Right Corner 3')
+                               THEN 'Corner 3'
+                           WHEN sa.zone_basic = 'Above the Break 3' THEN 'Above the Break 3'
+                           ELSE sa.zone_basic
+                       END AS normalized_zone
+                {joins}
+                WHERE {where_clause}
+            ), dimension_rows AS (
+                SELECT 'zone' AS dimension, normalized_zone AS label,
+                       CASE normalized_zone
+                           WHEN 'Rim' THEN '1'
+                           WHEN 'Paint' THEN '2'
+                           WHEN 'Midrange' THEN '3'
+                           WHEN 'Corner 3' THEN '4'
+                           WHEN 'Above the Break 3' THEN '5'
+                           ELSE '9' || normalized_zone
+                       END AS sort_key, shot_made, shot_type
+                FROM filtered
+                UNION ALL
+                SELECT 'venue', venue, CASE venue WHEN 'Home' THEN '1' ELSE '2' END,
+                       shot_made, shot_type
+                FROM filtered
+                UNION ALL
+                SELECT 'month', TO_CHAR(game_date, 'Mon YYYY'), TO_CHAR(game_date, 'YYYY-MM'),
+                       shot_made, shot_type
+                FROM filtered
+                UNION ALL
+                SELECT 'opponent', opponent_name, opponent_name, shot_made, shot_type
+                FROM filtered
+                UNION ALL
+                SELECT 'season_phase',
+                       CASE WHEN game_date < %s THEN 'Pre All-Star' ELSE 'Post All-Star' END,
+                       CASE WHEN game_date < %s THEN '1' ELSE '2' END,
+                       shot_made, shot_type
+                FROM filtered
+            )
+            SELECT dimension, label, sort_key,
+                   COUNT(*) AS attempts,
+                   COUNT(*) FILTER (WHERE shot_made) AS makes,
+                   COALESCE(SUM(
+                       CASE WHEN shot_made
+                           THEN CASE WHEN shot_type = '3PT Field Goal' THEN 3 ELSE 2 END
+                           ELSE 0
+                       END
+                   ), 0) AS points,
+                   ROUND(
+                       COUNT(*) FILTER (WHERE shot_made)::NUMERIC / NULLIF(COUNT(*), 0), 3
+                   ) AS fg_pct,
+                   ROUND(
+                       COUNT(*)::NUMERIC
+                       / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY dimension), 0), 3
+                   ) AS frequency,
+                   ROUND(
+                       SUM(
+                           CASE WHEN shot_made
+                               THEN CASE WHEN shot_type = '3PT Field Goal' THEN 3 ELSE 2 END
+                               ELSE 0
+                           END
+                       )::NUMERIC / NULLIF(COUNT(*), 0), 3
+                   ) AS points_per_shot,
+                   ROUND(
+                       (
+                           COUNT(*) FILTER (WHERE shot_made)
+                           + 0.5 * COUNT(*) FILTER (
+                               WHERE shot_made AND shot_type = '3PT Field Goal'
+                           )
+                       )::NUMERIC / NULLIF(COUNT(*), 0), 3
+                   ) AS efg_pct
+            FROM dimension_rows
+            GROUP BY dimension, label, sort_key
+            ORDER BY dimension, sort_key, label
+            """,
+            [*params, break_end, break_end],
+        )
+        raw_rows = cur.fetchall()
+
+    grouped: dict[str, list[ShotProfileRow]] = {
+        "zone": [],
+        "venue": [],
+        "month": [],
+        "opponent": [],
+        "season_phase": [],
+    }
+    for raw in raw_rows:
+        grouped[raw["dimension"]].append(
+            ShotProfileRow(
+                **{
+                    key: value
+                    for key, value in raw.items()
+                    if key != "dimension" and key != "sort_key"
+                }
+            )
+        )
+
+    zones = grouped["zone"]
+    total_attempts = sum(zone.attempts for zone in zones)
+    minimum_attempts = max(10, round(total_attempts * 0.02))
+    eligible = [zone for zone in zones if zone.attempts >= minimum_attempts]
+    best_area = max(eligible, key=lambda row: row.points_per_shot or 0) if eligible else None
+    lowest_area = (
+        min(eligible, key=lambda row: row.points_per_shot or 0) if len(eligible) > 1 else None
+    )
+    return ShotProfile(
+        season=season,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        zones=zones,
+        venue_splits=grouped["venue"],
+        month_splits=grouped["month"],
+        opponent_splits=grouped["opponent"],
+        season_phase_splits=grouped["season_phase"],
+        best_area=best_area,
+        lowest_area=lowest_area,
+    )
+
+
 # === Comparisons ===
 
 
@@ -702,7 +1176,7 @@ def _comparison_pair(values: list[int], label: str) -> tuple[int, int]:
 @app.get("/api/comparisons/players", response_model=PlayerComparison, tags=["Comparisons"])
 def compare_players(
     player_ids: Annotated[list[int], Query(description="Exactly two distinct player IDs")],
-    season: Annotated[str, Query(description="Season (required)")],
+    season: Annotated[str, Query(description="Season")] = DEFAULT_SEASON,
 ) -> PlayerComparison:
     first_id, second_id = _comparison_pair(player_ids, "player IDs")
     compared: list[PlayerSeasonAvg] = []
@@ -719,7 +1193,7 @@ def compare_players(
 @app.get("/api/comparisons/teams", response_model=TeamComparison, tags=["Comparisons"])
 def compare_teams(
     team_ids: Annotated[list[int], Query(description="Exactly two distinct team IDs")],
-    season: Annotated[str, Query(description="Season (required)")],
+    season: Annotated[str, Query(description="Season")] = DEFAULT_SEASON,
 ) -> TeamComparison:
     first_id, second_id = _comparison_pair(team_ids, "team IDs")
     entries = [
@@ -775,7 +1249,7 @@ def compare_teams(
 
 @app.get("/api/games", response_model=GameList, tags=["Games"])
 def list_games(
-    season: str | None = Query(None, description="Filter by season"),
+    season: str = Query(DEFAULT_SEASON, description="Filter by season"),
     team_id: int | None = Query(None, description="Filter by team"),
     sort: str = Query("desc", description="Sort by date: 'asc' or 'desc'"),
     limit: int = Query(50, ge=1, le=100),
@@ -899,7 +1373,7 @@ def get_game_boxscore(game_id: str) -> GameBoxScore:
 
 @app.get("/api/team-game-stats", response_model=TeamGameStatsList, tags=["Box Scores"])
 def list_team_game_stats(
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     team_id: int | None = Query(None, description="Filter by team"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -935,7 +1409,7 @@ def list_team_game_stats(
 
 @app.get("/api/player-game-stats", response_model=PlayerGameStatsList, tags=["Box Scores"])
 def list_player_game_stats(
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     player_id: int | None = Query(None, description="Filter by player"),
     team_id: int | None = Query(None, description="Filter by team"),
     game_id: str | None = Query(None, description="Filter by game"),
@@ -987,7 +1461,7 @@ StatCategory = Literal["points", "rebounds", "assists", "steals", "blocks"]
 @app.get("/api/leaders/{stat}", response_model=LeaderList, tags=["Leaders"])
 def get_leaders(
     stat: StatCategory,
-    season: str = Query(..., description="Season (required)"),
+    season: str = Query(DEFAULT_SEASON, description="Season"),
     limit: int = Query(10, ge=1, le=50),
 ) -> LeaderList:
     stat_column = {
@@ -1063,7 +1537,7 @@ def get_leaders(
 
 
 @app.get("/api/standings", response_model=list[TeamStanding], tags=["Standings"])
-def get_standings(season: str = Query(..., description="Season (required)")) -> list[TeamStanding]:
+def get_standings(season: str = Query(DEFAULT_SEASON, description="Season")) -> list[TeamStanding]:
     with get_cursor() as cur:
         cur.execute(
             """

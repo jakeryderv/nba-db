@@ -34,6 +34,26 @@ class Season(BaseModel):
     loaded_at: datetime
 
 
+class DatasetCounts(BaseModel):
+    games: int
+    players: int
+    team_game_stats: int
+    player_game_stats: int
+    shot_attempts: int
+
+
+class DatasetStatus(BaseModel):
+    season: str
+    season_type: str
+    is_default: bool
+    loaded_at: datetime
+    manifest_generated_at: datetime | None = None
+    verified_at: datetime | None = None
+    verification_status: str
+    manifest_sha256: str | None = None
+    counts: DatasetCounts
+
+
 # === Game Models ===
 
 
@@ -276,6 +296,30 @@ class ShotChart(BaseModel):
     truncated: bool
     data: list[ShotAttempt]
     zones: list[ShotZoneSummary]
+
+
+class ShotProfileRow(BaseModel):
+    label: str
+    attempts: int
+    makes: int
+    points: int
+    fg_pct: float | None = None
+    frequency: float
+    points_per_shot: float | None = None
+    efg_pct: float | None = None
+
+
+class ShotProfile(BaseModel):
+    season: str
+    subject_type: str
+    subject_id: int
+    zones: list[ShotProfileRow]
+    venue_splits: list[ShotProfileRow]
+    month_splits: list[ShotProfileRow]
+    opponent_splits: list[ShotProfileRow]
+    season_phase_splits: list[ShotProfileRow]
+    best_area: ShotProfileRow | None = None
+    lowest_area: ShotProfileRow | None = None
 
 
 class GameBoxScore(BaseModel):

@@ -28,7 +28,9 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check |
+| `GET /ready` | Verified default-season readiness and critical row counts |
 | `GET /api/seasons` | Loaded seasons |
+| `GET /api/dataset-status` | Dataset freshness, verification, manifest, and row counts |
 | `GET /api/teams` | All teams |
 | `GET /api/teams/{id}` | Team by ID |
 | `GET /api/teams/{id}/stats` | Team record, splits, and season averages |
@@ -39,7 +41,10 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | `GET /api/players/{id}/games` | Paginated player game log |
 | `GET /api/shot-chart/players` | Players with shot attempts in a season |
 | `GET /api/shot-chart/games` | Games with attempts for one player or team |
+| `GET /api/shot-chart/action-types` | Available action types in the loaded season |
 | `GET /api/shot-chart` | Player or team locations, efficiency, frequency, and league-relative zone analytics |
+| `GET /api/shot-profile` | Five-zone profile plus venue, month, opponent, and All-Star-break splits |
+| `GET /api/shot-chart.csv` | Complete filtered player or team shot-attempt export |
 | `GET /api/comparisons/players` | Compare exactly two players for a season |
 | `GET /api/comparisons/teams` | Compare two teams, including head-to-head results |
 | `GET /api/games` | Games (filter by `?season=`, `?team_id=`) |
@@ -56,10 +61,18 @@ curl "https://nba-api-production-0cd7.up.railway.app/api/leaders/points?season=2
 ```
 
 Shot-chart filters are shareable in the dashboard URL and can be opened directly from player,
-team, and game details. Zone results include shot frequency, points per shot, and the field-goal
-percentage difference from the league under the same season, game, opponent, period, and shot-type
-filters. League comparisons are omitted when filtering to makes or misses because that filter makes
-an efficiency baseline meaningless.
+team, and game details. Filters include opponent, game, date range, home/away venue, period,
+result, shot type, and action type. Zone results include shot frequency, points per shot, and the
+field-goal percentage difference from the league under the same context. League comparisons are
+omitted when filtering to makes or misses because that filter makes an efficiency baseline
+meaningless. Complete filtered attempts can be downloaded as CSV; browser plotting is capped while
+all aggregates remain complete.
+
+The shot profile normalizes official shot zones into rim, paint, midrange, corner-three, and
+above-the-break-three areas. It reports frequency, FG%, eFG%, and points per shot, highlights the
+highest and lowest-efficiency areas with a minimum-sample guard, and keeps every split within the
+loaded season. The 2025-26 phase boundary uses the first day after the official February 13-15,
+2026 All-Star weekend.
 
 ## Local development
 
@@ -70,12 +83,16 @@ make install       # uv sync
 make hooks-install # selective pre-commit and pre-push hooks
 cp .env.example .env
 make db-start      # PostgreSQL in Docker
-make season-build SEASON=2025-26
-make season-load-local SEASON=2025-26
+make season-build      # defaults to the verified product season, 2025-26
+make season-load-local
 make api           # http://localhost:8000
 ```
 
-Every data command requires an explicit season. There is no default season or default multi-season backfill. Run `make help` for the complete target list.
+The verified product default is centralized as `2025-26`. Read-only API filters, standalone
+extract/transform commands, and Make targets use that default. A different season can still be
+selected explicitly with `SEASON=YYYY-YY`. Database loads always replace the target with exactly one
+manifested Regular Season dataset; production still requires its typed season and deletion
+confirmations. Run `make help` for the complete target list.
 
 For a disposable environment with an empty schema, run `dagger up dev`. Dagger starts both PostgreSQL and the API, and exposes the API on port 8000 without using the host database.
 
@@ -198,9 +215,60 @@ The typed confirmations remain enforced inside the lifecycle command. Neither Gi
 
 Promotion verifies the manifest again, rejects local database targets, and takes a database advisory lock held from the protected custom-format `pg_dump` through the final live smoke check. It atomically replaces production so it contains exactly the confirmed season, then checks live health, season metadata, game identity/count, a sampled box score, standings, and points leaders against the manifest and promoted season. The API smoke check retries briefly; if it ultimately fails, the database replacement has already committed, so investigate immediately and restore the backup if the promoted data is not acceptable.
 
+Before production promotion, load the same manifested data into an isolated staging database and
+smoke-test the staging app. Keep staging and production in separate Railway environments with
+separate PostgreSQL services and variables. Export the staging secret rather than passing it on the
+command line:
+
+```bash
+export STAGING_DATABASE_URL
+make season-stage \
+  TARGET=staging \
+  CONFIRM_SEASON=2025-26 \
+  STAGING_API_URL=https://your-staging-app.example
+unset STAGING_DATABASE_URL
+```
+
+The staging command refuses local routes and refuses to run when staging and production URLs are
+the same. It applies migrations, replaces staging with the manifested season, and runs the same live
+API smoke suite. Smoke requests force cache revalidation.
+
 ### Backup restore guidance
 
-Keep the reported backup path and restrict access to it. First inspect the archive with `pg_restore --list` and restore it into an isolated recovery database using PostgreSQL's `pg_restore --clean --if-exists --no-owner` options. Verify season counts and API behavior there. Only then schedule a controlled production restore using the same archive. Supply connection fields and passwords through PostgreSQL environment variables or a protected service file—not command-line connection strings—and confirm the target database before running any restore. A restore replaces the full pre-promotion database state, including seasons that promotion removed.
+Keep the reported backup path and restrict access to it. Run the executable restore drill against a
+database name ending in `_recovery`; the command refuses an existing database, inspects the archive,
+restores it, verifies the one-season provenance counts, and removes the disposable database even
+when verification fails:
+
+```bash
+export RECOVERY_DATABASE_URL='postgresql://.../nba_recovery'
+make restore-drill \
+  BACKUP_FILE="$HOME/.local/share/nba-db/backups/<backup>.dump" \
+  RESTORE_CONFIRM='RESTORE nba_recovery'
+unset RECOVERY_DATABASE_URL
+```
+
+Only after this drill passes should an operator schedule a controlled production restore. A real
+production restore remains a manual incident operation because it replaces the entire database
+state, including seasons that promotion removed.
+
+### Production monitoring
+
+`/health` checks database connectivity while `/ready` additionally fails unless the verified default
+season and its critical row counts match provenance metadata. Every response carries an
+`X-Request-ID`, `Server-Timing`, and `X-Response-Time-Ms`; application logs include the same request
+ID and elevate requests over one second.
+
+Run a bounded live contract check at any time:
+
+```bash
+make live-check API_URL=https://nba-api-production-0cd7.up.railway.app
+```
+
+The scheduled GitHub workflow runs this check when the repository variable `LIVE_API_URL` is set.
+Its expected production totals are 1,230 games and 219,160 shots, so count drift, readiness failure,
+or broken core exploration endpoints fails the scheduled job. Use Railway's HTTP metrics and logs
+with the returned request ID to investigate latency or errors.
 
 ## Testing
 
@@ -219,6 +287,8 @@ make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 |----------|---------|
 | `DATABASE_URL` | Application/development connection string (takes precedence; used on Railway) |
 | `PRODUCTION_DATABASE_URL` | Promotion-only connection string; export interactively and never store in CLI arguments or GitHub Actions |
+| `STAGING_DATABASE_URL` | Staging-only connection string for the guarded staging load |
+| `RECOVERY_DATABASE_URL` | Drill-only connection string whose database name ends in `_recovery` |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` | Individual settings for local development |
 | `READONLY_DB_PASSWORD` | Optional. When set, `init_db.py` provisions a SELECT-only `nba_readonly` role and the web app connects as it |
 
@@ -230,9 +300,14 @@ Schema migration files are immutable after they have been applied. To change the
 
 ## Roadmap
 
-- [ ] Automated data refresh (production loading is currently a guarded operator task)
-- [x] Shot chart data, zone analytics, filters, and player/team comparisons
-- [ ] Historical season backfill
+- [ ] Stage and promote the already verified complete 2025-26 dataset
+- [x] Dataset freshness/provenance endpoint and visible verification status
+- [x] Shot charts, contextual filters, five-zone profiles, in-season splits, exports, and comparisons
+- [x] Browser acceptance coverage for primary, mobile, empty, error, sharing, and export flows
+- [x] Readiness, request telemetry, scheduled live checks, and executable backup restore drill
+- [ ] Tune further only from production HTTP metrics and query plans
+- [ ] Schedule trusted-machine extraction and staging; retain manual production approval
+- [ ] Deferred: historical backfill, multi-season promotion, and cross-season analysis
 
 ## License
 

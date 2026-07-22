@@ -18,9 +18,14 @@ def get_pool() -> ConnectionPool:
     if _pool is None:
         _pool = ConnectionPool(
             conninfo=get_conninfo(readonly=True),
-            kwargs={"row_factory": dict_row},
+            kwargs={
+                "row_factory": dict_row,
+                "options": "-c statement_timeout=15000 -c idle_in_transaction_session_timeout=15000",
+            },
             min_size=2,
             max_size=10,
+            max_waiting=20,
+            timeout=5,
             open=True,
         )
     return _pool

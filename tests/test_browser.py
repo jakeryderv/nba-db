@@ -195,9 +195,44 @@ def test_shot_chart_supports_filters_and_player_overlay(page: Page, live_url: st
     expect(result.get_by_role("heading", name="Jayson Tatum")).to_be_visible()
     expect(result.get_by_role("img", name="Half-court shot chart")).to_be_visible()
     expect(result.get_by_role("img", name="Shot density heatmap")).to_be_visible()
+    expect(result.get_by_role("heading", name="Five-zone profile")).to_be_visible()
+    expect(result.get_by_role("heading", name="Home / away")).to_be_visible()
+    expect(result.get_by_text("Best area", exact=False).first).to_be_visible()
     expect(result.locator(".shot-marker.shot-series-1.made")).to_have_count(120)
     expect(result.locator(".shot-marker.shot-series-2.made")).to_have_count(45)
     expect(result.locator(".shot-marker.missed")).to_have_count(0)
+
+    with page.expect_download() as download_info:
+        result.get_by_role("link", name="Download LeBron James CSV").click()
+    assert download_info.value.suggested_filename == "2024-25-player-2544-shots.csv"
+
+
+def test_shot_chart_handles_empty_results_and_mobile_controls(page: Page, live_url: str) -> None:
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{live_url}/#shots")
+    page.locator("#shot-subject").select_option(str(LEBRON))
+    page.locator("#shot-date-from").fill("2025-01-01")
+    page.get_by_role("button", name="Build chart").click()
+
+    result = page.locator("#shot-chart-result")
+    expect(result.get_by_role("heading", name="LeBron James")).to_be_visible()
+    expect(result.get_by_text("0 / 0", exact=True)).to_be_visible()
+    columns = page.locator("#shot-chart-form").evaluate(
+        "element => getComputedStyle(element).gridTemplateColumns"
+    )
+    assert len(columns.split()) == 1
+
+
+def test_shot_chart_reports_api_errors_without_breaking_navigation(
+    page: Page, live_url: str
+) -> None:
+    page.route("**/api/shot-profile?*", lambda route: route.fulfill(status=500, body="failed"))
+    page.goto(f"{live_url}/#shots")
+    page.locator("#shot-subject").select_option(str(LEBRON))
+    page.get_by_role("button", name="Build chart").click()
+
+    expect(page.locator("#shot-chart-result").get_by_role("alert")).to_contain_text("HTTP 500")
+    expect(page.get_by_role("link", name="Standings")).to_be_visible()
 
 
 def test_game_box_score_opens_shareable_contextual_shot_chart(page: Page, live_url: str) -> None:

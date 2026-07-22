@@ -1,5 +1,7 @@
 """API tests against the seeded nba_db_test database."""
 
+import csv
+import io
 import time
 from contextlib import contextmanager
 
@@ -26,6 +28,50 @@ def test_health_does_not_expose_database_error(client, monkeypatch):
     assert response.status_code == 503
     assert response.json() == {"detail": "Database unavailable"}
     assert "secret connection details" not in response.text
+
+
+def test_request_ids_are_propagated_or_safely_replaced(client):
+    supplied = client.get("/health", headers={"X-Request-ID": "browser-123"})
+    assert supplied.headers["x-request-id"] == "browser-123"
+
+    unsafe = client.get("/health", headers={"X-Request-ID": "bad id with spaces"})
+    assert unsafe.headers["x-request-id"] != "bad id with spaces"
+    assert len(unsafe.headers["x-request-id"]) == 32
+
+
+def test_readiness_requires_the_verified_complete_default_dataset(client, monkeypatch):
+    from app import main
+    from app.db import get_cursor
+
+    monkeypatch.setattr(main, "DEFAULT_SEASON", SEED_SEASON)
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE seasons
+            SET verification_status = 'passed', shot_attempts_count = 295
+            WHERE id = %s
+            """,
+            (SEED_SEASON,),
+        )
+    try:
+        response = client.get("/ready")
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "ready",
+            "season": SEED_SEASON,
+            "verification_status": "passed",
+            "counts": {"games": 10, "players": 3, "shot_attempts": 295},
+        }
+    finally:
+        with get_cursor() as cur:
+            cur.execute(
+                """
+                UPDATE seasons
+                SET verification_status = 'untracked', shot_attempts_count = 0
+                WHERE id = %s
+                """,
+                (SEED_SEASON,),
+            )
 
 
 class TestAdminEndpointsRemoved:
@@ -85,6 +131,30 @@ def test_list_seasons(client):
     assert r.status_code == 200
     assert [s["id"] for s in r.json()] == [SEED_SEASON]
     assert r.headers["cache-control"] == "public, max-age=300, stale-while-revalidate=3600"
+
+
+def test_dataset_status_reports_freshness_and_complete_counts(client):
+    response = client.get("/api/dataset-status", params={"season": SEED_SEASON})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["season"] == SEED_SEASON
+    assert body["season_type"] == "Regular Season"
+    assert body["is_default"] is False
+    assert body["verification_status"] == "untracked"
+    assert body["counts"] == {
+        "games": 10,
+        "players": 3,
+        "team_game_stats": 20,
+        "player_game_stats": 16,
+        "shot_attempts": 295,
+    }
+    assert float(response.headers["x-response-time-ms"]) >= 0
+    assert response.headers["server-timing"].startswith("app;dur=")
+
+
+def test_dataset_status_rejects_unknown_season(client):
+    assert client.get("/api/dataset-status", params={"season": "1999-00"}).status_code == 404
 
 
 def test_representative_read_endpoints_respond_promptly(client):
@@ -243,6 +313,13 @@ def test_shot_chart_players_only_lists_players_with_attempts(client):
     assert [player["id"] for player in response.json()] == [TATUM, LEBRON]
 
 
+def test_shot_action_types_are_sorted(client):
+    response = client.get("/api/shot-chart/action-types", params={"season": SEED_SEASON})
+
+    assert response.status_code == 200
+    assert response.json() == ["Driving Layup Shot", "Jump Shot", "Pullup Jump Shot"]
+
+
 def test_player_shot_chart_returns_locations_summary_and_zones(client):
     response = client.get(
         "/api/shot-chart",
@@ -258,16 +335,20 @@ def test_player_shot_chart_returns_locations_summary_and_zones(client):
     assert (body["league_fg_pct"], body["fg_pct_vs_league"]) == (0.559, 0.041)
     assert body["truncated"] is False
     assert len(body["data"]) == 200
-    assert {
-        "game_id": "0022400001",
-        "event_id": 1,
-        "player_name": "LeBron James",
-        "team_abbr": "LAL",
-        "opponent_id": CELTICS,
-        "opponent_abbr": "BOS",
-        "shot_type": "3PT Field Goal",
-        "shot_made": True,
-    }.items() <= body["data"][0].items()
+    assert any(
+        {
+            "game_id": "0022400001",
+            "event_id": 1,
+            "player_name": "LeBron James",
+            "team_abbr": "LAL",
+            "opponent_id": CELTICS,
+            "opponent_abbr": "BOS",
+            "shot_type": "3PT Field Goal",
+            "shot_made": True,
+        }.items()
+        <= attempt.items()
+        for attempt in body["data"]
+    )
     zones = {zone["zone_basic"]: zone for zone in body["zones"]}
     assert zones["Above the Break 3"] == {
         "zone_basic": "Above the Break 3",
@@ -319,6 +400,61 @@ def test_team_shot_chart_filters_and_reports_truncation(client):
     assert truncated["attempts"] == 200
     assert len(truncated["data"]) == 100
     assert truncated["truncated"] is True
+
+
+def test_shot_chart_supports_action_venue_and_date_filters(client):
+    action = client.get(
+        "/api/shot-chart",
+        params={
+            "season": SEED_SEASON,
+            "player_id": LEBRON,
+            "action_type": "Jump Shot",
+            "home_away": "home",
+            "date_from": "2024-11-06",
+            "date_to": "2024-11-10",
+        },
+    )
+
+    assert action.status_code == 200
+    assert action.json()["attempts"] == 30
+    assert all(row["action_type"] == "Jump Shot" for row in action.json()["data"])
+
+    away = client.get(
+        "/api/shot-chart",
+        params={"season": SEED_SEASON, "team_id": LAKERS, "home_away": "away"},
+    )
+    assert away.status_code == 200
+    assert away.json()["attempts"] == 0
+
+    invalid_dates = client.get(
+        "/api/shot-chart",
+        params={
+            "season": SEED_SEASON,
+            "player_id": LEBRON,
+            "date_from": "2024-12-01",
+            "date_to": "2024-11-01",
+        },
+    )
+    assert invalid_dates.status_code == 422
+
+
+def test_filtered_shot_chart_csv_exports_every_matching_attempt(client):
+    response = client.get(
+        "/api/shot-chart.csv",
+        params={
+            "season": SEED_SEASON,
+            "player_id": LEBRON,
+            "action_type": "Jump Shot",
+            "date_from": "2024-11-10",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "2024-25-player-2544-shots.csv" in response.headers["content-disposition"]
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert len(rows) == 6
+    assert {row["action_type"] for row in rows} == {"Jump Shot"}
 
 
 def test_shot_chart_games_are_subject_specific_and_sorted(client):
@@ -378,6 +514,43 @@ def test_shot_chart_requires_one_known_subject_and_valid_filters(client):
         ).status_code
         == 422
     )
+
+
+def test_shot_profile_normalizes_areas_and_reports_within_season_splits(client):
+    response = client.get(
+        "/api/shot-profile",
+        params={"season": SEED_SEASON, "player_id": LEBRON},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["subject_type"] == "player"
+    assert [(row["label"], row["attempts"]) for row in body["zones"]] == [
+        ("Rim", 140),
+        ("Above the Break 3", 60),
+    ]
+    assert body["zones"][0]["frequency"] == 0.7
+    assert body["zones"][0]["efg_pct"] == 0.714
+    assert body["venue_splits"][0]["label"] == "Home"
+    assert body["month_splits"][0]["label"] == "Nov 2024"
+    assert body["opponent_splits"][0]["label"] == "Boston Celtics"
+    assert body["season_phase_splits"][0]["label"] == "Pre All-Star"
+    assert body["best_area"]["label"] == "Rim"
+    assert body["lowest_area"]["label"] == "Above the Break 3"
+
+
+def test_shot_profile_uses_the_same_filter_validation_as_the_chart(client):
+    assert client.get("/api/shot-profile", params={"season": SEED_SEASON}).status_code == 422
+    response = client.get(
+        "/api/shot-profile",
+        params={
+            "season": SEED_SEASON,
+            "player_id": LEBRON,
+            "date_from": "2024-12-01",
+            "date_to": "2024-11-01",
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_list_games_filtered_by_season_and_team(client):

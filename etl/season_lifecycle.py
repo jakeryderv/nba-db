@@ -174,6 +174,7 @@ class SeasonDataset:
     player_stats: pd.DataFrame
     shots: pd.DataFrame
     manifest: dict[str, Any] | None = None
+    manifest_sha256: str | None = None
 
     @property
     def counts(self) -> dict[str, int]:
@@ -185,6 +186,11 @@ class SeasonDataset:
             "player_game_stats": len(self.player_stats),
             "shot_attempts": len(self.shots),
         }
+
+    @property
+    def participating_players_count(self) -> int:
+        """Players who appeared in the season, distinct from the shared catalog size."""
+        return int(self.player_stats["player_id"].nunique())
 
 
 def validate_season_name(season: str) -> None:
@@ -837,7 +843,13 @@ def verify_manifest(clean_root: Path, season: str) -> SeasonDataset:
         )
     if verification.get("sha256") != _sha256(verification_file):
         raise ManifestVerificationError("Official verification changed while reading")
-    return SeasonDataset(**{**dataset.__dict__, "manifest": manifest})
+    return SeasonDataset(
+        **{
+            **dataset.__dict__,
+            "manifest": manifest,
+            "manifest_sha256": _sha256(path),
+        }
+    )
 
 
 def _rows(frame: pd.DataFrame, columns: list[str]) -> list[tuple[Any, ...]]:
@@ -851,6 +863,14 @@ def _rows(frame: pd.DataFrame, columns: list[str]) -> list[tuple[Any, ...]]:
         tuple(python_value(value) for value in row)
         for row in frame[columns].itertuples(index=False, name=None)
     ]
+
+
+def _copy_rows(cur: psycopg.Cursor, table: str, columns: list[str], frame: pd.DataFrame) -> None:
+    """Bulk-load validated rows with COPY to keep production WAL bounded."""
+    column_list = ", ".join(columns)
+    with cur.copy(f"COPY {table} ({column_list}) FROM STDIN") as copy:
+        for row in _rows(frame, columns):
+            copy.write_row(row)
 
 
 def _scalar(cur: psycopg.Cursor) -> Any:
@@ -907,10 +927,23 @@ def _verify_database(cur: psycopg.Cursor, dataset: SeasonDataset, single_season:
         raise SeasonLifecycleError(
             "Database integrity verification failed inside replacement transaction"
         )
-    cur.execute("SELECT games_count, players_count FROM seasons WHERE id = %s", (dataset.season,))
+    cur.execute(
+        """
+        SELECT games_count, players_count, shot_attempts_count,
+               verification_status, manifest_sha256
+        FROM seasons WHERE id = %s
+        """,
+        (dataset.season,),
+    )
     metadata = cur.fetchone()
-    expected_players = int(dataset.player_stats["player_id"].nunique())
-    if metadata != (dataset.counts["games"], expected_players):
+    expected_status = "passed" if dataset.manifest else "untracked"
+    if metadata != (
+        dataset.counts["games"],
+        dataset.participating_players_count,
+        dataset.counts["shot_attempts"],
+        expected_status,
+        dataset.manifest_sha256,
+    ):
         raise SeasonLifecycleError("Season metadata does not match the validated dataset")
     if single_season:
         cur.execute("SELECT array_agg(id ORDER BY id) FROM seasons")
@@ -976,11 +1009,10 @@ def replace_season(
                 _rows(dataset.players, PLAYER_COLUMNS),
             )
             if single_season:
-                cur.execute("DELETE FROM shot_attempts")
-                cur.execute("DELETE FROM player_game_stats")
-                cur.execute("DELETE FROM team_game_stats")
-                cur.execute("DELETE FROM games")
-                cur.execute("DELETE FROM seasons")
+                cur.execute(
+                    "TRUNCATE shot_attempts, player_game_stats, team_game_stats, "
+                    "games, seasons RESTART IDENTITY"
+                )
                 cur.execute(
                     "DELETE FROM players WHERE NOT (id = ANY(%s))",
                     (dataset.players["id"].astype(int).tolist(),),
@@ -1007,53 +1039,40 @@ def replace_season(
                 )
                 cur.execute("DELETE FROM games WHERE season = %s", (dataset.season,))
                 cur.execute("DELETE FROM seasons WHERE id = %s", (dataset.season,))
-            cur.executemany(
+            start_year = int(dataset.season[:4])
+            cur.execute(
                 """
-                INSERT INTO games (
-                    id, game_date, season, home_team_id, away_team_id, home_score, away_score
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO seasons (id, start_year, end_year, games_count, players_count)
+                VALUES (%s, %s, %s, 0, 0)
                 """,
-                _rows(dataset.games, GAME_COLUMNS),
+                (dataset.season, start_year, start_year + 1),
             )
-            cur.executemany(
-                """
-                INSERT INTO team_game_stats (
-                    game_id, team_id, season, is_home, minutes, points, rebounds,
-                    offensive_rebounds, defensive_rebounds, assists, steals, blocks,
-                    turnovers, personal_fouls, fgm, fga, fg_pct, fg3m, fg3a,
-                    fg3_pct, ftm, fta, ft_pct, plus_minus
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                _rows(dataset.team_stats, TEAM_STATS_COLUMNS),
-            )
-            cur.executemany(
-                """
-                INSERT INTO player_game_stats (
-                    game_id, player_id, team_id, season, minutes, points, rebounds,
-                    offensive_rebounds, defensive_rebounds, assists, steals, blocks,
-                    turnovers, personal_fouls, fgm, fga, fg_pct, fg3m, fg3a,
-                    fg3_pct, ftm, fta, ft_pct, plus_minus
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                _rows(dataset.player_stats, PLAYER_STATS_COLUMNS),
-            )
-            cur.executemany(
-                """
-                INSERT INTO shot_attempts (
-                    game_id, event_id, player_id, team_id, season, period,
-                    minutes_remaining, seconds_remaining, action_type, shot_type,
-                    zone_basic, zone_area, zone_range, shot_distance, loc_x, loc_y,
-                    shot_made
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s
-                )
-                """,
-                _rows(dataset.shots, SHOT_COLUMNS),
-            )
+            _copy_rows(cur, "games", GAME_COLUMNS, dataset.games)
+            _copy_rows(cur, "team_game_stats", TEAM_STATS_COLUMNS, dataset.team_stats)
+            _copy_rows(cur, "player_game_stats", PLAYER_STATS_COLUMNS, dataset.player_stats)
+            _copy_rows(cur, "shot_attempts", SHOT_COLUMNS, dataset.shots)
             cur.execute("CALL sp_update_season_metadata(%s)", (dataset.season,))
+            manifest = dataset.manifest or {}
+            verification = manifest.get("official_verification", {})
+            cur.execute(
+                """
+                UPDATE seasons
+                SET shot_attempts_count = %s,
+                    manifest_generated_at = %s,
+                    verified_at = %s,
+                    verification_status = %s,
+                    manifest_sha256 = %s
+                WHERE id = %s
+                """,
+                (
+                    dataset.counts["shot_attempts"],
+                    manifest.get("generated_at"),
+                    verification.get("generated_at"),
+                    "passed" if verification.get("status") == "passed" else "untracked",
+                    dataset.manifest_sha256,
+                    dataset.season,
+                ),
+            )
             _verify_database(cur, dataset, single_season)
 
 
@@ -1116,6 +1135,33 @@ def production_db_config(target: str, season: str, confirmation: str) -> dict[st
         raise PromotionSafetyError(
             "Promotion refuses local, unspecified, or Unix-socket production routing"
         )
+    return config
+
+
+def staging_db_config(target: str, season: str, confirmation: str) -> dict[str, Any]:
+    """Resolve an explicitly confirmed, non-local staging database."""
+    if target != "staging":
+        raise PromotionSafetyError("Staging load requires the explicit target 'staging'")
+    if confirmation != season:
+        raise PromotionSafetyError("Typed season confirmation does not match")
+    staging_url = os.getenv("STAGING_DATABASE_URL")
+    if not staging_url:
+        raise PromotionSafetyError("Staging load requires an explicit STAGING_DATABASE_URL")
+    if not staging_url.startswith(("postgresql://", "postgres://")):
+        raise PromotionSafetyError("STAGING_DATABASE_URL must be a PostgreSQL URL")
+    try:
+        config: dict[str, Any] = conninfo_to_dict(staging_url)
+    except Exception as exc:
+        raise PromotionSafetyError("STAGING_DATABASE_URL is not a valid PostgreSQL URL") from exc
+    if _route_is_unsafe(config):
+        raise PromotionSafetyError(
+            "Staging load refuses local, unspecified, or Unix-socket routing"
+        )
+    production_url = os.getenv("PRODUCTION_DATABASE_URL")
+    if production_url and make_conninfo("", **config) == make_conninfo(
+        "", **conninfo_to_dict(production_url)
+    ):
+        raise PromotionSafetyError("Staging and production database URLs must be different")
     return config
 
 
@@ -1203,11 +1249,40 @@ def create_backup(
 
 
 def _smoke_once(api_url: str, dataset: SeasonDataset, get: Callable[..., Any]) -> None:
-    health = get(f"{api_url}/health", timeout=10)
+    request_options = {
+        "timeout": 10,
+        "headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    }
+    health = get(f"{api_url}/health", **request_options)
     health.raise_for_status()
     if health.json() != {"status": "healthy", "database": "connected"}:
         raise SeasonLifecycleError("Live health response is not healthy")
-    seasons = get(f"{api_url}/api/seasons", timeout=10)
+    readiness = get(f"{api_url}/ready", **request_options)
+    readiness.raise_for_status()
+    readiness_body = readiness.json()
+    if (
+        readiness_body.get("status") != "ready"
+        or readiness_body.get("season") != dataset.season
+        or readiness_body.get("verification_status") != "passed"
+        or readiness_body.get("counts", {}).get("games") != dataset.counts["games"]
+        or readiness_body.get("counts", {}).get("players") != dataset.participating_players_count
+        or readiness_body.get("counts", {}).get("shot_attempts") != dataset.counts["shot_attempts"]
+    ):
+        raise SeasonLifecycleError("Live readiness response does not match the promoted manifest")
+    status = get(
+        f"{api_url}/api/dataset-status",
+        params={"season": dataset.season},
+        **request_options,
+    )
+    status.raise_for_status()
+    status_body = status.json()
+    if (
+        status_body.get("verification_status") != "passed"
+        or status_body.get("manifest_sha256") != dataset.manifest_sha256
+        or status_body.get("counts", {}).get("shot_attempts") != dataset.counts["shot_attempts"]
+    ):
+        raise SeasonLifecycleError("Live provenance response does not match the promoted manifest")
+    seasons = get(f"{api_url}/api/seasons", **request_options)
     seasons.raise_for_status()
     seasons_body = seasons.json()
     season_rows = [row for row in seasons_body if row.get("id") == dataset.season]
@@ -1220,7 +1295,7 @@ def _smoke_once(api_url: str, dataset: SeasonDataset, get: Callable[..., Any]) -
     games = get(
         f"{api_url}/api/games",
         params={"season": dataset.season, "limit": 1},
-        timeout=10,
+        **request_options,
     )
     games.raise_for_status()
     body = games.json()
@@ -1233,7 +1308,7 @@ def _smoke_once(api_url: str, dataset: SeasonDataset, get: Callable[..., Any]) -
     ):
         raise SeasonLifecycleError("Live games response does not match the promoted manifest")
     sampled_game_id = str(dataset.games.iloc[0]["id"])
-    boxscore = get(f"{api_url}/api/games/{sampled_game_id}/boxscore", timeout=10)
+    boxscore = get(f"{api_url}/api/games/{sampled_game_id}/boxscore", **request_options)
     boxscore.raise_for_status()
     boxscore_body = boxscore.json()
     if (
@@ -1244,7 +1319,11 @@ def _smoke_once(api_url: str, dataset: SeasonDataset, get: Callable[..., Any]) -
         != int((dataset.player_stats["game_id"] == sampled_game_id).sum())
     ):
         raise SeasonLifecycleError("Live boxscore response does not contain the promoted game")
-    standings = get(f"{api_url}/api/standings", params={"season": dataset.season}, timeout=10)
+    standings = get(
+        f"{api_url}/api/standings",
+        params={"season": dataset.season},
+        **request_options,
+    )
     standings.raise_for_status()
     standings_body = standings.json()
     expected_team_ids = set(dataset.games["home_team_id"]) | set(dataset.games["away_team_id"])
@@ -1257,7 +1336,7 @@ def _smoke_once(api_url: str, dataset: SeasonDataset, get: Callable[..., Any]) -
     leaders = get(
         f"{api_url}/api/leaders/points",
         params={"season": dataset.season, "limit": 1},
-        timeout=10,
+        **request_options,
     )
     leaders.raise_for_status()
     leaders_body = leaders.json()
@@ -1287,7 +1366,7 @@ def verify_live_api(
             if attempt + 1 < attempts:
                 sleep(2)
     raise SeasonLifecycleError(
-        "Live API smoke verification failed after the database commit; inspect production immediately"
+        f"Live API smoke verification failed after the database commit: {last_error}"
     ) from last_error
 
 
@@ -1298,6 +1377,15 @@ def _production_api_url(value: str) -> str:
     return value.rstrip("/")
 
 
+def _staging_api_url(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise PromotionSafetyError(
+            "Staging load requires an explicit credential-free HTTPS API_URL"
+        )
+    return value.rstrip("/")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clean-root", type=Path, default=CLEAN_ROOT)
@@ -1305,6 +1393,11 @@ def _parser() -> argparse.ArgumentParser:
     for command in ("validate-season", "manifest", "load-local"):
         child = subparsers.add_parser(command)
         child.add_argument("--season", required=True)
+    stage = subparsers.add_parser("stage")
+    stage.add_argument("--season", required=True)
+    stage.add_argument("--target", required=True)
+    stage.add_argument("--confirm-season", required=True)
+    stage.add_argument("--api-url", required=True)
     promote = subparsers.add_parser("promote")
     promote.add_argument("--season", required=True)
     promote.add_argument("--target", required=True)
@@ -1336,6 +1429,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 apply_schema(conn)
                 replace_season(conn, dataset, single_season=True)
             print(f"Local database now contains only season {args.season}")
+            return 0
+        if args.command == "stage":
+            config = staging_db_config(args.target, args.season, args.confirm_season)
+            api_url = _staging_api_url(args.api_url)
+            dataset = verify_manifest(args.clean_root, args.season)
+            with promotion_operation_lock(config):
+                with psycopg.connect(**config) as conn:
+                    apply_schema(conn)
+                    replace_season(
+                        conn,
+                        dataset,
+                        single_season=True,
+                        acquire_advisory_lock=False,
+                    )
+                verify_live_api(api_url, dataset)
+            print(f"Staging now contains only season {args.season}")
             return 0
 
         if args.confirm_single_season != "DELETE OTHER SEASONS":

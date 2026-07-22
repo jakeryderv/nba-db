@@ -1,7 +1,7 @@
 [project]
 name = "nba-db"
 version = "0.1.0"
-description = "Add your description here"
+description = "Verified 2025-26 NBA statistics API, dashboard, and shot-chart pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,6 +26,7 @@ dev = [
     "playwright>=1.50.0",
     "pip-audit>=2.9.0",
     "pre-commit>=4.3.0",
+    "httpx2>=2.7.0",
 ]
 
 [tool.ruff]
