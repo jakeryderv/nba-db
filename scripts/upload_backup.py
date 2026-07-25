@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,10 +35,26 @@ def upload_backup(
     manifest_sha256: str,
     client: S3Client,
     bucket: str,
+    runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, str | int]:
     """Upload a regular custom-format backup and verify its checksum metadata."""
     if not backup.is_file() or backup.is_symlink() or backup.suffix != ".dump":
         raise ArtifactArchiveError("Backup must be a regular non-symlink .dump file")
+    # A dump that pg_restore cannot inspect can never be restored; catching
+    # that here closes the window between upload and the next restore drill.
+    try:
+        listing = runner(
+            ["pg_restore", "--list", str(backup)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise ArtifactArchiveError(
+            "pg_restore is required to validate the backup archive before upload"
+        ) from exc
+    if listing.returncode != 0:
+        raise ArtifactArchiveError("Backup archive failed pg_restore inspection; refusing upload")
     checksum = _sha256(backup)
     key = f"database-backups/{season}/{backup.name}"
     metadata = {"sha256": checksum, "manifest": manifest_sha256}

@@ -1,5 +1,7 @@
 """Database connection pool for FastAPI."""
 
+import logging
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -9,6 +11,8 @@ from psycopg_pool import ConnectionPool
 
 from db.config import get_conninfo
 
+logger = logging.getLogger(__name__)
+
 _pool: ConnectionPool | None = None
 
 
@@ -16,8 +20,13 @@ def get_pool() -> ConnectionPool:
     """Get or create the connection pool."""
     global _pool
     if _pool is None:
+        # The SELECT-only role is the expected production posture; owner
+        # credentials are a deliberate, visible local-development fallback.
+        readonly = bool(os.getenv("READONLY_DB_PASSWORD"))
+        if not readonly:
+            logger.warning("READONLY_DB_PASSWORD is not set; connecting with owner credentials")
         _pool = ConnectionPool(
-            conninfo=get_conninfo(readonly=True),
+            conninfo=get_conninfo(readonly=readonly),
             kwargs={
                 "row_factory": dict_row,
                 "options": "-c statement_timeout=15000 -c idle_in_transaction_session_timeout=15000",

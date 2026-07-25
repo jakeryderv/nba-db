@@ -10,6 +10,21 @@ from scripts.download_backup import latest_backup
 from scripts.upload_backup import prune_backups, upload_backup
 
 
+class FakeArchiveCheck:
+    """Stand-in for subprocess.run inspecting the archive with pg_restore."""
+
+    def __init__(self, returncode: int = 0, missing: bool = False) -> None:
+        self.returncode = returncode
+        self.missing = missing
+        self.commands: list[list[str]] = []
+
+    def __call__(self, command: list[str], **_kwargs) -> "FakeArchiveCheck":
+        self.commands.append(command)
+        if self.missing:
+            raise FileNotFoundError("pg_restore")
+        return self
+
+
 class FakeS3:
     def __init__(self) -> None:
         self.uploads: list[tuple[str, str, str, dict]] = []
@@ -88,6 +103,7 @@ def test_upload_backup_uses_a_separate_retention_prefix(tmp_path: Path) -> None:
     backup = tmp_path / "production.dump"
     backup.write_bytes(b"database backup")
     client = FakeS3()
+    archive_check = FakeArchiveCheck()
 
     receipt = upload_backup(
         backup,
@@ -95,11 +111,47 @@ def test_upload_backup_uses_a_separate_retention_prefix(tmp_path: Path) -> None:
         manifest_sha256="b" * 64,
         client=client,
         bucket="nba-db-artifacts",
+        runner=archive_check,
     )
 
     assert receipt["location"] == ("s3://nba-db-artifacts/database-backups/2025-26/production.dump")
     assert receipt["backup_bytes"] == len(b"database backup")
     assert client.metadata["manifest"] == "b" * 64
+    assert archive_check.commands == [["pg_restore", "--list", str(backup)]]
+
+
+def test_upload_backup_refuses_uninspectable_archive(tmp_path: Path) -> None:
+    backup = tmp_path / "production.dump"
+    backup.write_bytes(b"not a real archive")
+    client = FakeS3()
+
+    with pytest.raises(ArtifactArchiveError, match="failed pg_restore inspection"):
+        upload_backup(
+            backup,
+            season="2025-26",
+            manifest_sha256="b" * 64,
+            client=client,
+            bucket="nba-db-artifacts",
+            runner=FakeArchiveCheck(returncode=1),
+        )
+    assert client.uploads == []
+
+
+def test_upload_backup_requires_pg_restore(tmp_path: Path) -> None:
+    backup = tmp_path / "production.dump"
+    backup.write_bytes(b"database backup")
+    client = FakeS3()
+
+    with pytest.raises(ArtifactArchiveError, match="pg_restore is required"):
+        upload_backup(
+            backup,
+            season="2025-26",
+            manifest_sha256="b" * 64,
+            client=client,
+            bucket="nba-db-artifacts",
+            runner=FakeArchiveCheck(missing=True),
+        )
+    assert client.uploads == []
 
 
 def test_backup_retention_preserves_minimum_copies_and_deletes_expired_objects() -> None:

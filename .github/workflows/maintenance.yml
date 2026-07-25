@@ -87,6 +87,19 @@ jobs:
             test -n "$PRODUCTION_DATABASE_URL"
           fi
 
+      - name: Install PostgreSQL 18 client for backup validation
+        if: steps.mode.outputs.backup == 'true'
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          pg_restore --version
+
       - name: Create, upload, and retain production backup
         if: steps.mode.outputs.backup == 'true'
         env:

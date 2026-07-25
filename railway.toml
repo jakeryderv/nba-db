@@ -3,7 +3,7 @@ builder = "RAILPACK"
 
 [deploy]
 startCommand = "uv run --no-sync python scripts/init_db.py && uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT"
-healthcheckPath = "/health"
+healthcheckPath = "/ready"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
