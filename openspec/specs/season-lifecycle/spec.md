@@ -1,0 +1,160 @@
+# season-lifecycle
+
+## Purpose
+
+Loading a season replaces the entire contents of a database. In production that
+database is the live product, and the operation is destructive by design: the
+single-season posture deletes every other season and prunes shared rows. There
+is no undo beyond the backup the command itself takes.
+
+The command therefore assumes it is being run by an operator who could be
+wrong about which database they are pointed at. Every guard here is aimed at
+that: the target must be named explicitly, the season must be typed back, the
+destructive intent must be typed out in full, and the resolved route must not
+be able to be the local machine. Confirmations are compared against the
+requested season rather than being a yes/no prompt, so a confirmation cannot be
+supplied reflexively or scripted once and reused across seasons.
+
+Agents do not run these commands. The guards exist for a human who has the
+context to accept the consequences.
+
+## Requirements
+
+### Requirement: Staging and production loads require an explicitly named target and typed confirmations
+
+A staging load SHALL require the literal target `staging`; a promotion SHALL
+require the literal target `production`. Both SHALL require the operator to
+retype the season being loaded, and SHALL refuse when it does not match.
+Promotion SHALL additionally require the destructive intent to be typed out in
+full as `DELETE OTHER SEASONS`.
+
+These confirmations SHALL be positional facts about the operation — the season
+name, the consequence — not generic acknowledgements, so that confirming
+requires knowing what is being done.
+
+#### Scenario: Mistyped season aborts
+
+- **WHEN** the typed season confirmation does not match the season being loaded
+- **THEN** the command fails before connecting to any database
+
+#### Scenario: Promotion without the destructive confirmation aborts
+
+- **WHEN** a promotion is invoked without the exact single-season confirmation phrase
+- **THEN** the command fails before taking a backup or modifying data
+
+### Requirement: Remote targets refuse local, unspecified, and socket routing
+
+Staging and production connection resolution SHALL require an explicit database
+URL from the environment, SHALL require it to be a PostgreSQL URL, and SHALL
+refuse routes that are loopback, unspecified, Unix-socket, or empty — including
+each entry of a multi-host route. A staging URL that resolves to the same
+connection as the production URL SHALL be refused.
+
+Conversely, a local load SHALL refuse to run when a database URL is set in the
+environment and SHALL require a loopback host, so that a command meant for the
+development database cannot reach a deployed one.
+
+#### Scenario: Production URL pointing at localhost is refused
+
+- **WHEN** the production database URL resolves to a loopback or unspecified address
+- **THEN** promotion fails rather than rewriting the local database under production confirmations
+
+#### Scenario: Staging pointed at production is refused
+
+- **WHEN** the staging and production database URLs resolve to the same connection
+- **THEN** the staging load fails
+
+#### Scenario: Local load with a database URL set is refused
+
+- **WHEN** a local load runs with a database URL present in the environment
+- **THEN** it fails rather than using it
+
+### Requirement: Promotion takes a verified, private backup before modifying data
+
+Promotion SHALL create a backup before any data is modified, and SHALL abort
+the promotion if the backup cannot be created or is not valid. Backup creation
+SHALL refuse to overwrite an existing path, SHALL require a parent directory
+that exists, is not a symlink, and permits no group or other access, and SHALL
+create the artifact with owner-only permissions before writing.
+
+The database password SHALL NOT appear in the dump command's arguments, and the
+child process environment SHALL NOT carry the production or default database
+URLs. The artifact SHALL be finalized by atomic rename, so a partial dump is
+never left at the backup path.
+
+#### Scenario: Failed dump aborts promotion
+
+- **WHEN** the dump command fails or produces an empty file
+- **THEN** the temporary artifact is removed and promotion aborts before touching the data
+
+#### Scenario: World-readable backup directory aborts promotion
+
+- **WHEN** the backup's parent directory permits group or other access
+- **THEN** promotion fails before the dump runs
+
+#### Scenario: Credentials stay out of the process table
+
+- **WHEN** the dump runs
+- **THEN** the password is passed by environment, not in the command arguments
+
+### Requirement: Replacement is atomic, serialized, and self-verifying
+
+A season replacement SHALL execute inside a single transaction. Concurrent
+replacements SHALL be serialized by an advisory lock; for staging and
+production the lock SHALL be held across backup, replacement, and live
+verification as one operation.
+
+Before the transaction commits, the replacement SHALL verify against the
+database it just wrote: per-table row counts SHALL match the manifest, the
+recorded season metadata SHALL match the validated dataset, and referential
+consistency between games and their team and player lines SHALL hold. Under the
+single-season posture it SHALL additionally confirm that no other season
+remains in any table and that no stale shared team or player rows survive. Any
+failure SHALL abort the transaction, leaving the previous contents intact.
+
+#### Scenario: Count mismatch rolls back
+
+- **WHEN** post-load counts disagree with the manifest inside the replacement transaction
+- **THEN** the transaction aborts and the database retains its previous contents
+
+#### Scenario: Leftover season rolls back
+
+- **WHEN** a single-season replacement would leave rows from another season
+- **THEN** the transaction aborts
+
+### Requirement: Staging and promotion verify the live deployment against the manifest
+
+After replacement, a staging load or promotion SHALL verify the deployed API
+while still holding the operation lock, retrying a bounded number of times.
+Verification SHALL confirm health, that readiness reports the promoted season
+with passing verification and matching counts, that public dataset status
+reports the promoted manifest digest, and that the seasons, games, boxscore,
+standings, and leaders endpoints are consistent with the promoted dataset.
+
+Live verification runs after the replacement transaction has committed, so a
+failure at this stage means a bad deployment is already serving. The command
+SHALL report the failure; the backup taken at the start of the promotion is the
+recovery path.
+
+#### Scenario: Live counts that disagree fail the promotion
+
+- **WHEN** the deployed readiness or dataset-status response does not match the promoted manifest
+- **THEN** the command exits with an error identifying the mismatch
+
+#### Scenario: Transient unavailability is retried
+
+- **WHEN** the deployment is briefly unreachable immediately after replacement
+- **THEN** verification retries before declaring failure
+
+### Requirement: Lifecycle commands are operator-only
+
+Staging and promotion commands SHALL be run only by an operator. No automation,
+CI job, or agent SHALL invoke them, supply their confirmations, or handle the
+production database URL beyond what an operator explicitly asks for in the
+moment. No change SHALL add a code path that satisfies these guards
+programmatically.
+
+#### Scenario: Automation does not promote
+
+- **WHEN** a workflow or agent needs production data changed
+- **THEN** it surfaces the request to the operator rather than invoking the promotion command

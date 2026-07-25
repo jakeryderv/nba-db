@@ -20,3 +20,10 @@ data/
 
 # Ephemeral scheduled-maintenance artifacts
 .maintenance/
+
+# OpenSpec agent-tool instruction files; regenerate with `openspec update`.
+# Only openspec/ itself is tracked.
+.agent/
+.claude/commands/opsx/
+.claude/skills/openspec-*/
+.codex/skills/openspec-*/
