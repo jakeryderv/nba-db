@@ -261,3 +261,28 @@ def test_game_box_score_opens_shareable_contextual_shot_chart(page: Page, live_u
     expect(result.get_by_role("heading", name="Los Angeles Lakers")).to_be_visible()
     expect(result.get_by_text(re.compile("vs league")).first).to_be_visible()
     expect(result.locator(".shot-marker")).to_have_count(39)
+
+
+def test_docs_page_renders_under_the_strict_csp(page: Page, live_url: str) -> None:
+    """Swagger must actually render, not merely return 200.
+
+    The page is served with self-hosted assets specifically because the CSP
+    forbids external scripts and the inline initializer FastAPI ships. This
+    asserts the result of that: operations visible, and no CSP violation or
+    blocked request along the way.
+    """
+    blocked: list[str] = []
+    page.on(
+        "console",
+        lambda message: blocked.append(message.text)
+        if "Content Security Policy" in message.text
+        else None,
+    )
+    page.on("requestfailed", lambda request: blocked.append(f"failed: {request.url}"))
+
+    page.goto(f"{live_url}/docs")
+
+    expect(page.get_by_role("heading", name="NBA Database API")).to_be_visible()
+    expect(page.locator("#swagger-ui .opblock").first).to_be_visible()
+    expect(page.get_by_text("/api/standings").first).to_be_visible()
+    assert blocked == []

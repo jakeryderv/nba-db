@@ -5,9 +5,14 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Vendored third-party assets are excluded from the file-content hooks:
+      # they must stay byte-identical to what upstream publishes, because
+      # tests/test_docs_page.py verifies them against recorded SHA-256 digests.
+      # A hook that rewrites them would silently invalidate that check.
       - id: check-added-large-files
         args: [--maxkb=1000]
         stages: [pre-commit]
+        exclude: ^app/static/vendor/
       - id: check-case-conflict
         stages: [pre-commit]
       - id: check-json
@@ -22,8 +27,10 @@ repos:
         stages: [pre-commit]
       - id: end-of-file-fixer
         stages: [pre-commit]
+        exclude: ^app/static/vendor/
       - id: trailing-whitespace
         stages: [pre-commit]
+        exclude: ^app/static/vendor/
 
   - repo: local
     hooks:

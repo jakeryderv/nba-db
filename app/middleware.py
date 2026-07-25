@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import threading
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 from time import monotonic, perf_counter
 from uuid import uuid4
 
@@ -21,7 +21,23 @@ CONTENT_SECURITY_POLICY = (
     "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
     "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
+PERMISSIONS_POLICY = (
+    "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+    "magnetometer=(), microphone=(), payment=(), usb=()"
+)
+STRICT_TRANSPORT_SECURITY = "max-age=31536000; includeSubDomains"
 EXPENSIVE_PATHS = {"/api/shot-chart", "/api/shot-profile", "/api/shot-chart.csv"}
+
+# Rate limiting is default-on for the whole surface. Anything not limited is
+# named here, so a new route is covered the day it is added rather than by
+# whether it happens to sit under a particular prefix.
+EXEMPT_PATHS = {"/health"}
+EXEMPT_PREFIXES = ("/static/",)
+
+# Readiness gets its own budget rather than sharing the general one: Railway's
+# healthcheck reads it, and a flood against the rest of the surface must not be
+# able to spend the budget the platform needs to keep the release healthy.
+READINESS_PATHS = {"/ready"}
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -35,10 +51,39 @@ def _positive_int(name: str, default: int) -> int:
 class SlidingWindowLimiter:
     """Small process-local limiter suitable for the app's single Railway replica."""
 
-    def __init__(self, window_seconds: int = 60) -> None:
+    # How many least-recently-used entries to reclaim per call. Bounded so a
+    # request never pays for a full sweep of the table.
+    _EVICTION_BUDGET = 8
+
+    def __init__(self, window_seconds: int = 60, max_keys: int = 10_000) -> None:
         self.window_seconds = window_seconds
-        self._requests: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self.max_keys = max_keys
+        # Ordered least- to most-recently used, so reclaiming from the front
+        # takes the entries most likely to have aged out.
+        self._requests: OrderedDict[tuple[str, str], deque[float]] = OrderedDict()
         self._lock = threading.Lock()
+        self._capacity_warned = False
+
+    @property
+    def tracked_keys(self) -> int:
+        """Number of client/group entries currently held."""
+        with self._lock:
+            return len(self._requests)
+
+    def _reclaim(self, cutoff: float) -> None:
+        """Drop least-recently-used keys whose windows have fully drained."""
+        for _ in range(self._EVICTION_BUDGET):
+            if not self._requests:
+                return
+            key = next(iter(self._requests))
+            requests = self._requests[key]
+            while requests and requests[0] <= cutoff:
+                requests.popleft()
+            if requests:
+                # The least-recently-used entry is still active, so nothing
+                # older remains to reclaim.
+                return
+            del self._requests[key]
 
     def check(
         self, client: str, group: str, limit: int, now: float | None = None
@@ -47,20 +92,54 @@ class SlidingWindowLimiter:
         cutoff = current - self.window_seconds
         key = (client, group)
         with self._lock:
-            requests = self._requests[key]
-            while requests and requests[0] <= cutoff:
-                requests.popleft()
+            self._reclaim(cutoff)
+            requests = self._requests.get(key)
+            if requests is None:
+                requests = deque()
+                self._requests[key] = requests
+            else:
+                self._requests.move_to_end(key)
+                while requests and requests[0] <= cutoff:
+                    requests.popleft()
             if len(requests) >= limit:
                 retry_after = max(1, int(self.window_seconds - (current - requests[0])) + 1)
                 return False, retry_after
             requests.append(current)
+            # A hard cap backstops the reclaim pass against a flood of distinct
+            # keys. Evicting the least-recently-used entry keeps limiting in
+            # force; refusing new keys instead would let anyone who fills the
+            # table deny service to everyone else.
+            while len(self._requests) > self.max_keys:
+                self._requests.popitem(last=False)
+                if not self._capacity_warned:
+                    self._capacity_warned = True
+                    logger.warning(
+                        "Rate limiter reached its %d-key cap; evicting least-recently-used clients",
+                        self.max_keys,
+                    )
             return True, 0
 
 
-def _client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    if forwarded:
-        return forwarded[:100]
+def _client_key(request: Request, trusted_hops: int = 1) -> str:
+    """Identify the caller by the hop the trusted edge appended.
+
+    Each proxy appends the peer it received the request from, so a caller can
+    prepend entries to X-Forwarded-For but cannot append past the edge. Reading
+    from the right is therefore the only way to get a value the caller does not
+    control; the leftmost value -- which uvicorn's proxy-header handling also
+    returns when it trusts every host -- is caller-chosen and useless as a key.
+
+    This assumes ingress always passes through the trusted edge, which holds on
+    Railway: the public domain routes through the edge proxy and the service is
+    not otherwise publicly reachable. If the app is ever exposed directly, a
+    caller could supply the whole chain and this derivation stops being sound.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+    if len(hops) >= trusted_hops >= 1:
+        return hops[-trusted_hops][:100]
+    # No header, or a chain shorter than the expected proxy depth: the header
+    # is absent or forged, so fall back to the peer we can actually observe.
     return request.client.host[:100] if request.client else "unknown"
 
 
@@ -71,6 +150,8 @@ def _apply_response_policy(request: Request, response: Response, elapsed_ms: flo
     response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
+    response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
     revision = os.getenv("RAILWAY_GIT_COMMIT_SHA", "development")
     if revision == "development" or re.fullmatch(r"[0-9a-f]{7,40}", revision):
         response.headers["X-Release-Revision"] = revision
@@ -85,6 +166,18 @@ def _apply_response_policy(request: Request, response: Response, elapsed_ms: flo
             response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
 
 
+def apply_error_policy(request: Request, response: Response) -> None:
+    """Apply response policy to a response built outside the middleware stack.
+
+    Starlette's ServerErrorMiddleware sits outside this middleware, so a
+    response produced by the catch-all exception handler never passes back
+    through dispatch and would otherwise ship without security headers.
+    """
+    if not getattr(request.state, "request_id", ""):
+        request.state.request_id = uuid4().hex
+    _apply_response_policy(request, response, 0.0)
+
+
 class RequestPolicyMiddleware(BaseHTTPMiddleware):
     """Apply bounded public-API access, request correlation, and response policy."""
 
@@ -93,7 +186,24 @@ class RequestPolicyMiddleware(BaseHTTPMiddleware):
         self.enabled = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "no"}
         self.general_limit = _positive_int("RATE_LIMIT_REQUESTS", 600)
         self.expensive_limit = _positive_int("RATE_LIMIT_EXPENSIVE_REQUESTS", 120)
-        self.limiter = SlidingWindowLimiter(_positive_int("RATE_LIMIT_WINDOW_SECONDS", 60))
+        self.readiness_limit = _positive_int("RATE_LIMIT_READY_REQUESTS", 600)
+        # One trusted hop: Railway's edge. Configurable so the position can be
+        # corrected without a code change if the edge topology differs.
+        self.trusted_hops = _positive_int("TRUSTED_PROXY_HOPS", 1)
+        self.limiter = SlidingWindowLimiter(
+            _positive_int("RATE_LIMIT_WINDOW_SECONDS", 60),
+            max_keys=_positive_int("RATE_LIMIT_MAX_CLIENTS", 10_000),
+        )
+
+    def _limit_group(self, path: str) -> tuple[str, int] | None:
+        """Classify a path for limiting, or None when it is exempt."""
+        if path in EXEMPT_PATHS or path.startswith(EXEMPT_PREFIXES):
+            return None
+        if path in READINESS_PATHS:
+            return "ready", self.readiness_limit
+        if path in EXPENSIVE_PATHS:
+            return "expensive", self.expensive_limit
+        return "general", self.general_limit
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         started = perf_counter()
@@ -104,13 +214,12 @@ class RequestPolicyMiddleware(BaseHTTPMiddleware):
             else uuid4().hex
         )
 
-        limited_api_request = request.url.path.startswith("/api/") and (
-            request.method == "GET" or request.url.path == "/api/telemetry"
-        )
-        if self.enabled and limited_api_request:
-            group = "expensive" if request.url.path in EXPENSIVE_PATHS else "api"
-            limit = self.expensive_limit if group == "expensive" else self.general_limit
-            allowed, retry_after = self.limiter.check(_client_key(request), group, limit)
+        classification = self._limit_group(request.url.path) if self.enabled else None
+        if classification is not None:
+            group, limit = classification
+            allowed, retry_after = self.limiter.check(
+                _client_key(request, self.trusted_hops), group, limit
+            )
             if not allowed:
                 response: Response = JSONResponse(
                     status_code=429,
