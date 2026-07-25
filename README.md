@@ -2,7 +2,7 @@
 
 A read-only web app and REST API for exploring NBA statistics — standings, stat leaders, box scores, and player search — backed by PostgreSQL and an ETL pipeline over the official NBA API.
 
-**Live:** https://nba-api-production-0cd7.up.railway.app · **API docs:** https://nba-api-production-0cd7.up.railway.app/docs
+**Live:** https://nba.jvs.sh · **API docs:** https://nba.jvs.sh/docs
 
 ## How it works
 
@@ -56,8 +56,8 @@ All endpoints are read-only. Interactive docs at `/docs`.
 | `GET /api/standings` | League standings (`?season=` required) |
 
 ```bash
-curl "https://nba-api-production-0cd7.up.railway.app/api/players?search=lebron"
-curl "https://nba-api-production-0cd7.up.railway.app/api/leaders/points?season=2025-26"
+curl "https://nba.jvs.sh/api/players?search=lebron"
+curl "https://nba.jvs.sh/api/leaders/points?season=2025-26"
 ```
 
 Shot-chart filters are shareable in the dashboard URL and can be opened directly from player,
@@ -192,7 +192,7 @@ make season-promote \
   CONFIRM_SEASON=2025-26 \
   CONFIRM_SINGLE_SEASON='DELETE OTHER SEASONS' \
   BACKUP_FILE="$HOME/.local/share/nba-db/backups/nba-db-before-2025-26-20260721T180000Z.dump" \
-  API_URL=https://nba-api-production-0cd7.up.railway.app
+  API_URL=https://nba.jvs.sh
 unset PRODUCTION_DATABASE_URL
 ```
 
@@ -203,7 +203,7 @@ dagger call promote \
   --season=2025-26 \
   --confirm-season=2025-26 \
   --confirm-single-season='DELETE OTHER SEASONS' \
-  --api-url=https://nba-api-production-0cd7.up.railway.app \
+  --api-url=https://nba.jvs.sh \
   --backup-name=nba-db-before-2025-26-20260722T010000Z.dump \
   --operation-id=production-2025-26-20260722T010000Z \
   --production-database-url=env:PRODUCTION_DATABASE_URL \
@@ -272,7 +272,7 @@ ID and elevate requests over one second.
 Run a bounded live contract check at any time:
 
 ```bash
-make live-check API_URL=https://nba-api-production-0cd7.up.railway.app
+make live-check API_URL=https://nba.jvs.sh
 ```
 
 The scheduled and manually dispatched GitHub workflow runs this check using the configured

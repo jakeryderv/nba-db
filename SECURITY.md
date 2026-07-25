@@ -13,7 +13,7 @@ service logs.
 
 ## Scope
 
-The deployed application at `https://nba-api-production-0cd7.up.railway.app` and the code in this
+The deployed application at `https://nba.jvs.sh` and the code in this
 repository are in scope.
 
 The application is deliberately read-only and exposes no authenticated surface, no user accounts,
