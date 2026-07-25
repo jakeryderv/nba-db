@@ -43,7 +43,7 @@ def test_readonly_role_can_select_but_not_insert(client, monkeypatch):
         conn.close()
 
 
-def test_config_ignores_readonly_flag_when_password_unset(client, monkeypatch):
+def test_config_fails_closed_when_readonly_password_unset(monkeypatch):
     monkeypatch.delenv("READONLY_DB_PASSWORD", raising=False)
-    config = get_db_config(readonly=True)
-    assert config["user"] != "nba_readonly"
+    with pytest.raises(RuntimeError, match="READONLY_DB_PASSWORD"):
+        get_db_config(readonly=True)

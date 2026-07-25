@@ -12,8 +12,9 @@ load_dotenv()
 def get_db_config(readonly: bool = False) -> dict[str, Any]:
     """Return PostgreSQL connection parameters.
 
-    With readonly=True and READONLY_DB_PASSWORD set, connect as the
-    configured SELECT-only role instead of the owner.
+    With readonly=True, connect as the configured SELECT-only role.
+    READONLY_DB_PASSWORD must then be set: failing closed here keeps a
+    missing variable from silently granting owner credentials.
     """
     database_url = os.getenv("DATABASE_URL")
     if database_url:
@@ -33,9 +34,12 @@ def get_db_config(readonly: bool = False) -> dict[str, Any]:
 
     if readonly:
         ro_password = os.getenv("READONLY_DB_PASSWORD")
-        if ro_password:
-            config["user"] = os.getenv("READONLY_DB_USER", "nba_readonly")
-            config["password"] = ro_password
+        if not ro_password:
+            raise RuntimeError(
+                "A readonly connection was requested but READONLY_DB_PASSWORD is not set"
+            )
+        config["user"] = os.getenv("READONLY_DB_USER", "nba_readonly")
+        config["password"] = ro_password
 
     return config
 
