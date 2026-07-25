@@ -4,6 +4,22 @@ Read-only NBA stats API and dashboard backed by PostgreSQL with an operator-run 
 pipeline. The README covers architecture; this file covers workflow rules and commands
 that are not inferable from the code.
 
+## Sources of truth
+
+- `openspec/specs/` owns invariants and binding decisions. The README owns usage
+  and architecture; `docs/operations/` owns the current production record. Where a
+  spec exists, it wins — flag the disagreement rather than silently following code.
+- Only a few capabilities are specced (dataset provenance, schema migrations,
+  production access, season lifecycle, release readiness). Absence of a spec means
+  the code and README are authoritative for that area, not that anything goes.
+- Check `openspec/changes/` for an active change before non-trivial work, and use
+  `/opsx:propose` for work that changes a specced invariant. Small fixes do not
+  need a change proposal.
+- Planned work lives in GitHub Issues. Close them with `Fixes #N` in the
+  implementing commit.
+- Agent instruction files under `.agent/`, `.claude/`, and `.codex/` are generated
+  by `openspec init`/`openspec update` and are not tracked; only `openspec/` is.
+
 ## Git workflow
 
 - `main` is branch-protected (PR-only, `quality` CI check required, linear history,

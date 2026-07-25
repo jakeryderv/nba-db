@@ -1,0 +1,56 @@
+schema: spec-driven
+
+context: |
+  Read-only NBA stats API and dashboard: FastAPI + psycopg 3 over PostgreSQL,
+  with an operator-run ETL pipeline against the official NBA API. Deployed on
+  Railway at https://nba.jvs.sh. Python 3.11, uv, PostgreSQL 16 locally and 18
+  in Dagger/staging/production.
+
+  Layout: app/ (API + single-page dashboard), etl/ (extract, transform, load,
+  official_verification, season_lifecycle), db/schema/ (numbered migrations),
+  scripts/ (operator and CI tooling), tests/ + db/tests/.
+
+  Source of truth: openspec/specs/ owns invariants and binding decisions.
+  README owns usage and architecture; docs/operations/ owns the current
+  production record. Only a handful of capabilities are specced — absence of a
+  spec means the code and README are authoritative, not that anything goes.
+
+  Single-season product. nba_config.DEFAULT_SEASON is operator-controlled, not
+  derived from the calendar: a season becomes default only after its complete
+  dataset passes official verification and the guarded promotion workflow.
+
+  Commands: `make install`, `make db-start`, `make api` to run locally.
+  `make test` (API + browser suite, needs `make db-start` first). `make check`
+  for formatting, ruff, docs, and mypy — run it before claiming work is done.
+  `make dagger-check` is the full portable merge gate CI also runs. Invoking
+  pytest directly requires PYTEST_DISABLE_PLUGIN_AUTOLOAD=1.
+
+  Safety rails, none of which a change may weaken as a convenience: season
+  lifecycle commands touching staging or production are operator-only and
+  require typed confirmations; schema migrations are append-only numbered
+  files under db/schema/ enforced by a checksum check; transformed data,
+  manifests, and verification reports under data/ are never hand-edited
+  because loads verify checksums and fail closed; production serves through a
+  SELECT-only role. PRODUCTION_DATABASE_URL is handled only as an operator
+  explicitly asks.
+
+  Git: `main` is branch-protected — PR-only, `quality` check required, linear
+  history, admins included. Merge with
+  `gh pr merge --squash --delete-branch` and an explicit --subject/--body.
+  Conventional commit messages; no AI attribution or Co-Authored-By trailers.
+  Merging to main deploys to production, gated by the /ready healthcheck and
+  verified afterward by the release observer.
+
+  Known issues and planned work live in GitHub Issues, not in the repo. Each
+  is a candidate change; close them with `Fixes #N` in the implementing commit
+  so the ledger cannot drift from the code.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
