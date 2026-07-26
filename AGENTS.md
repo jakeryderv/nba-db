@@ -36,6 +36,9 @@ that are not inferable from the code.
   directly, set `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (the Makefile already does).
 - `make check` — formatting, ruff, docs, mypy. Run before claiming work done.
 - `make dagger-check` — the full portable merge gate; same pipeline CI runs.
+- `make openspec-archive CHANGE=<name>` — archive a completed change. Use this
+  rather than `openspec archive` directly: the CLI omits trailing newlines on the
+  spec files it rewrites, which trips the end-of-file hook and aborts the commit.
 
 ## Safety rails (do not work around these)
 
