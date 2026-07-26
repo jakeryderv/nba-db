@@ -115,6 +115,32 @@ warning for anything arriving from a public path.
   no wider than today's exposure, and closing it properly needs origin
   allowlisting that Railway does not provide.
 
+## What the flip actually found
+
+The preflight reasoning above was wrong in practice and is left standing as a
+record of the mistake. Inferring the zone's feature state from the already-
+proxied apex proved nothing: that page carries neither scripts nor email
+addresses, so no rewriting feature could have left a mark on it whether enabled
+or not. The absence of markers was not evidence.
+
+An injecting feature was in fact enabled — not Rocket Loader, but **Cloudflare
+Web Analytics (RUM)**, set to inject automatically, which added
+`static.cloudflareinsights.com/beacon.min.js` to every HTML response. The CSP
+blocked it, exactly as the requirement predicts, producing a violation on every
+page load while leaving the pages themselves working.
+
+Two things this validates and one it corrects:
+
+- The requirement was right to name *injected analytics* alongside script
+  loaders, and right that the failure surfaces only in a browser: nothing in the
+  origin logs, the healthcheck, `check_live.py`, or the release observer noticed
+  it. The browser check was the only thing that could catch it, and did.
+- The failure mode was benign — degraded, not broken — which is what made
+  continuing preferable to reverting once the toggle was available.
+- The lesson: verify the feature state directly, or verify against a page that
+  shares the *application's* characteristics. Never infer from an unrelated page
+  that has nothing for the feature to act on.
+
 ## Open Questions
 
 - Should the static assets get a longer edge TTL than the origin's one hour?
