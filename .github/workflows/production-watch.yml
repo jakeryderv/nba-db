@@ -1,0 +1,167 @@
+name: Production Watch
+
+# Watches production from outside the jobs it reports on.
+#
+# The release observer runs only on workflow_run, so nothing sees production
+# between merges. The maintenance workflow reconciles its own alerts from inside
+# itself, so a schedule that stops firing produces silence rather than an alert.
+# Both gaps have the same shape: a signal emitted by its own subject disappears
+# exactly when the subject fails.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Which check to run
+        required: true
+        default: liveness
+        type: choice
+        options:
+          - liveness
+          - freshness
+      api_url_override:
+        description: Probe this URL instead of LIVE_API_URL. Used to exercise the alert path.
+        required: false
+        type: string
+      max_age_hours:
+        description: Override the maximum backup age in hours. Used to exercise the alert path.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-watch-${{ github.event.schedule || inputs.mode || 'dispatch' }}
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select scheduled check
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          liveness=false
+          freshness=false
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$REQUESTED_MODE" in
+              liveness) liveness=true ;;
+              freshness) freshness=true ;;
+              *) echo "Unsupported mode: $REQUESTED_MODE"; exit 2 ;;
+            esac
+          elif [ "$SCHEDULE" = "*/10 * * * *" ]; then
+            liveness=true
+          elif [ "$SCHEDULE" = "0 14 * * *" ]; then
+            freshness=true
+          else
+            echo "Unknown schedule: $SCHEDULE"
+            exit 2
+          fi
+          echo "liveness=$liveness" >> "$GITHUB_OUTPUT"
+          echo "freshness=$freshness" >> "$GITHUB_OUTPUT"
+
+      - name: Validate watch configuration
+        env:
+          LIVE_API_URL: ${{ vars.LIVE_API_URL }}
+          API_URL_OVERRIDE: ${{ inputs.api_url_override }}
+        run: |
+          set -euo pipefail
+          probe_url="${API_URL_OVERRIDE:-$LIVE_API_URL}"
+          test -n "$probe_url"
+          if [ "${{ steps.mode.outputs.freshness }}" = "true" ]; then
+            test -n "${{ vars.AWS_ENDPOINT_URL }}"
+            test -n "${{ vars.AWS_S3_BUCKET_NAME }}"
+          fi
+
+      - name: Probe readiness
+        id: liveness
+        if: steps.mode.outputs.liveness == 'true'
+        env:
+          LIVE_API_URL: ${{ vars.LIVE_API_URL }}
+          API_URL_OVERRIDE: ${{ inputs.api_url_override }}
+        run: |
+          set -uo pipefail
+          probe_url="${API_URL_OVERRIDE:-$LIVE_API_URL}"
+          probe_url="${probe_url%/}"
+          # Cache-busting headers are required, not cosmetic. A cached response
+          # outlives the instance that produced it, so answering this check from
+          # cache asserts that production was healthy when the response was
+          # stored -- precisely the claim the check exists to avoid making.
+          for attempt in 1 2 3; do
+            body="$(curl --fail --silent --show-error --max-time 15 \
+              --header 'Cache-Control: no-cache' \
+              --header 'Pragma: no-cache' \
+              "${probe_url}/ready" 2>&1)" || body=""
+            status="$(printf '%s' "$body" | jq -r '.status // empty' 2>/dev/null || true)"
+            if [ "$status" = "ready" ]; then
+              echo "Ready on attempt $attempt."
+              printf '%s\n' "$body" | jq -c '.'
+              exit 0
+            fi
+            echo "Attempt $attempt did not observe a ready instance."
+            [ "$attempt" -lt 3 ] && sleep 20
+          done
+          # Three spaced failures, not one: a single transient blip should not
+          # open an issue, while a real outage fails all three and detection
+          # still lands inside one schedule interval.
+          echo "::error::Production did not report ready across three attempts." >&2
+          printf 'Last response: %s\n' "$body" >&2
+          exit 1
+
+      - uses: astral-sh/setup-uv@v7
+        if: steps.mode.outputs.freshness == 'true'
+        with:
+          enable-cache: true
+
+      - name: Assert backup and drill freshness
+        id: freshness
+        if: steps.mode.outputs.freshness == 'true'
+        env:
+          AWS_ENDPOINT_URL: ${{ vars.AWS_ENDPOINT_URL }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          AWS_S3_BUCKET_NAME: ${{ vars.AWS_S3_BUCKET_NAME }}
+          AWS_S3_URL_STYLE: ${{ vars.AWS_S3_URL_STYLE }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          MAX_AGE_OVERRIDE: ${{ inputs.max_age_hours }}
+        run: |
+          set -euo pipefail
+          arguments=(--season "2025-26")
+          if [ -n "${MAX_AGE_OVERRIDE:-}" ]; then
+            arguments+=(--max-age-hours "$MAX_AGE_OVERRIDE")
+          fi
+          uv run --locked --no-dev --extra ops python scripts/check_backup_freshness.py \
+            "${arguments[@]}"
+
+      # Distinct titles per concern. The reconciler matches titles exactly, so
+      # neither of these can close the other's alert or either of maintenance's.
+      - name: Reconcile liveness alert
+        if: always() && steps.mode.outputs.liveness == 'true'
+        uses: ./.github/actions/reconcile-alert
+        with:
+          title: Production liveness check failed
+          passed: ${{ steps.liveness.outcome == 'success' }}
+          token: ${{ github.token }}
+
+      - name: Reconcile backup freshness alert
+        if: always() && steps.mode.outputs.freshness == 'true'
+        uses: ./.github/actions/reconcile-alert
+        with:
+          title: Production backup freshness check failed
+          passed: ${{ steps.freshness.outcome == 'success' }}
+          token: ${{ github.token }}

@@ -84,16 +84,23 @@ jobs:
           echo "healthy=$healthy" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
 
+      # These two steps stay inline rather than using .github/actions/reconcile-alert
+      # like the maintenance workflow does. A repo-local composite action requires a
+      # checkout, and the checkout above runs only when CI succeeded -- so routing
+      # this through the shared action would silence the alert on CI failure, the
+      # case it most exists to report. Duplication is the lesser cost here.
       - name: Close resolved production alert
         if: steps.state.outputs.healthy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          ALERT_TITLE: Production release requires attention
         run: |
           gh label create production-alert --color D73A4A \
             --description "Automated production operations require attention" --force
-          issue_number="$(gh issue list --state open --label production-alert \
-            --search 'Production release requires attention in:title' --json number --jq '.[0].number // empty')"
+          issue_number="$(gh issue list --state open --label production-alert --limit 100 \
+            --json number,title \
+            --jq 'map(select(.title == env.ALERT_TITLE)) | .[0].number // empty')"
           if [ -n "$issue_number" ]; then
             gh issue close "$issue_number" --comment "Resolved by successful release verification $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
@@ -107,16 +114,18 @@ jobs:
           # itself on a CI failure, the case it most exists to report.
           GH_REPO: ${{ github.repository }}
           REASON: ${{ steps.state.outputs.reason }}
+          ALERT_TITLE: Production release requires attention
         run: |
           gh label create production-alert --color D73A4A \
             --description "Automated production operations require attention" --force
-          issue_number="$(gh issue list --state open --label production-alert \
-            --search 'Production release requires attention in:title' --json number --jq '.[0].number // empty')"
+          issue_number="$(gh issue list --state open --label production-alert --limit 100 \
+            --json number,title \
+            --jq 'map(select(.title == env.ALERT_TITLE)) | .[0].number // empty')"
           source_url="${{ github.event.workflow_run.html_url }}"
           if [ -n "$issue_number" ]; then
             gh issue comment "$issue_number" --body "$REASON. Source run: $source_url"
           else
-            gh issue create --title "Production release requires attention" \
+            gh issue create --title "$ALERT_TITLE" \
               --label production-alert \
               --body "$REASON. Source run: $source_url"
           fi

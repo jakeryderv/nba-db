@@ -40,6 +40,10 @@ class S3Client(Protocol):
 
     def download_file(self, bucket: str, key: str, filename: str) -> Any: ...
 
+    def get_object(self, Bucket: str, Key: str) -> dict[str, Any]: ...
+
+    def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict[str, Any]: ...
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -47,6 +51,33 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def backup_prefix(season: str) -> str:
+    """Return the object-storage prefix holding a season's database backups."""
+    return f"database-backups/{season}/"
+
+
+def list_prefix_objects(client: S3Client, bucket: str, prefix: str) -> list[dict[str, Any]]:
+    """Return every object under a prefix, following continuation tokens.
+
+    A truncated listing that omits its continuation token is treated as an error
+    rather than a short result. Callers use these listings to decide what to keep
+    and what to delete, and a silently partial view makes both decisions wrong.
+    """
+    objects: list[dict[str, Any]] = []
+    token: str | None = None
+    while True:
+        arguments: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
+        if token:
+            arguments["ContinuationToken"] = token
+        response = client.list_objects_v2(**arguments)
+        objects.extend(response.get("Contents", []))
+        if not response.get("IsTruncated"):
+            return objects
+        token = response.get("NextContinuationToken")
+        if not token:
+            raise ArtifactArchiveError("Backup listing was truncated without a continuation token")
 
 
 def archive_sources(raw_root: Path, clean_root: Path, season: str) -> list[tuple[Path, Path]]:

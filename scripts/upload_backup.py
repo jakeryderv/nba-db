@@ -23,6 +23,8 @@ from scripts.archive_dataset import (  # noqa: E402
     S3Client,
     _s3_client,
     _sha256,
+    backup_prefix,
+    list_prefix_objects,
 )
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -97,20 +99,8 @@ def prune_backups(
         raise ArtifactArchiveError("Minimum backup copies must be positive")
     current = now or datetime.now(UTC)
     cutoff = current - timedelta(days=retention_days)
-    prefix = f"database-backups/{season}/"
-    objects: list[dict[str, Any]] = []
-    continuation_token: str | None = None
-    while True:
-        arguments: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
-        if continuation_token:
-            arguments["ContinuationToken"] = continuation_token
-        response = client.list_objects_v2(**arguments)
-        objects.extend(response.get("Contents", []))
-        if not response.get("IsTruncated"):
-            break
-        continuation_token = response.get("NextContinuationToken")
-        if not continuation_token:
-            raise ArtifactArchiveError("Backup listing was truncated without a continuation token")
+    prefix = backup_prefix(season)
+    objects = list_prefix_objects(client, bucket, prefix)
 
     candidates = sorted(objects, key=lambda item: item["LastModified"], reverse=True)
     deleted: list[str] = []

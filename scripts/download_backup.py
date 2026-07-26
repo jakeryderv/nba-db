@@ -8,7 +8,6 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,6 +19,8 @@ from scripts.archive_dataset import (  # noqa: E402
     S3Client,
     _s3_client,
     _sha256,
+    backup_prefix,
+    list_prefix_objects,
 )
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -33,20 +34,8 @@ def latest_backup(
         raise ArtifactArchiveError("Output must be a new .dump file")
     if not output_file.parent.is_dir():
         raise ArtifactArchiveError("Backup output directory must already exist")
-    prefix = f"database-backups/{season}/"
-    objects: list[dict[str, Any]] = []
-    token: str | None = None
-    while True:
-        arguments: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
-        if token:
-            arguments["ContinuationToken"] = token
-        response = client.list_objects_v2(**arguments)
-        objects.extend(response.get("Contents", []))
-        if not response.get("IsTruncated"):
-            break
-        token = response.get("NextContinuationToken")
-        if not token:
-            raise ArtifactArchiveError("Backup listing was truncated without a continuation token")
+    prefix = backup_prefix(season)
+    objects = list_prefix_objects(client, bucket, prefix)
     backups = [
         item
         for item in objects

@@ -1,23 +1,24 @@
 ## 1. Extract alert reconciliation
 
-- [ ] 1.1 Create `.github/actions/reconcile-alert/action.yml` as a composite action taking `title`, `passed`, and `run-url`, reproducing the current `reconcile()` behavior: create on first failure, comment on repeat failure, close on recovery.
-- [ ] 1.2 Repoint `.github/workflows/maintenance.yml` at the composite action, keeping the existing per-operation titles (`Production backup failed`, `Production restore drill failed`) byte-identical so no in-flight alert is orphaned.
-- [ ] 1.3 Confirm the label bootstrap (`gh label create production-alert --force`) lives in exactly one place after the extraction.
+- [x] 1.1 Create `.github/actions/reconcile-alert/action.yml` as a composite action taking `title`, `passed`, and `run-url`, reproducing the current `reconcile()` behavior: create on first failure, comment on repeat failure, close on recovery.
+- [x] 1.2 Repoint `.github/workflows/maintenance.yml` at the composite action, keeping the existing per-operation titles (`Production backup failed`, `Production restore drill failed`) byte-identical so no in-flight alert is orphaned.
+- [x] 1.3 Consolidate the label bootstrap into the composite action for every caller that can use it. `release-observer.yml` keeps its inline copy: its alert must file when CI failed, which is exactly when its conditional checkout is skipped, so it cannot depend on a repo-local action. Record that reason in the workflow.
+- [x] 1.4 Replace the `--search "<title> in:title"` lookup in `release-observer.yml` with the same exact-title match, so every reconciler resolves alerts identically even though one stays inline.
 
 ## 2. Backup freshness
 
-- [ ] 2.1 Add a failing test for a freshness function that fails when the newest backup exceeds a maximum age, passes within it, and fails when no backup exists at all.
-- [ ] 2.2 Implement the check in `scripts/` reusing the existing paginated listing, taking `--max-age-hours` and reporting the newest backup's age either way.
-- [ ] 2.3 Extend it to assert the last drill is no older than 40 days, reading the pointer object from task 5.1.
-- [ ] 2.4 Assert the check does not import or depend on the backup job's code path, so it cannot pass by virtue of the backup job having run.
+- [x] 2.1 Add a failing test for a freshness function that fails when the newest backup exceeds a maximum age, passes within it, and fails when no backup exists at all.
+- [x] 2.2 Implement the check in `scripts/` reusing the existing paginated listing, taking `--max-age-hours` and reporting the newest backup's age either way.
+- [x] 2.3 Extend it to assert the last drill is no older than 40 days, reading the pointer object from task 5.1.
+- [x] 2.4 Assert the check does not import or depend on the backup job's code path, so it cannot pass by virtue of the backup job having run.
 
 ## 3. Liveness workflow
 
-- [ ] 3.1 Create `.github/workflows/production-watch.yml` with a `*/10 * * * *` liveness schedule, a `0 14 * * *` freshness schedule, and a mode-select step following `maintenance.yml`'s pattern.
-- [ ] 3.2 Implement the liveness probe against `/ready` with `Cache-Control: no-cache` and `Pragma: no-cache`, asserting HTTP 200 and a ready status.
-- [ ] 3.3 Add three spaced in-job retries before declaring failure, so a transient blip does not open an issue.
-- [ ] 3.4 Wire both modes to the composite action with distinct titles (`Production liveness check failed`, `Production backup freshness check failed`), so neither can close the other's alert or maintenance's.
-- [ ] 3.5 Add `workflow_dispatch` with a mode input and validate the required configuration (`LIVE_API_URL`) before probing.
+- [x] 3.1 Create `.github/workflows/production-watch.yml` with a `*/10 * * * *` liveness schedule, a `0 14 * * *` freshness schedule, and a mode-select step following `maintenance.yml`'s pattern.
+- [x] 3.2 Implement the liveness probe against `/ready` with `Cache-Control: no-cache` and `Pragma: no-cache`, asserting HTTP 200 and a ready status.
+- [x] 3.3 Add three spaced in-job retries before declaring failure, so a transient blip does not open an issue.
+- [x] 3.4 Wire both modes to the composite action with distinct titles (`Production liveness check failed`, `Production backup freshness check failed`), so neither can close the other's alert or maintenance's.
+- [x] 3.5 Add `workflow_dispatch` with a mode input and validate the required configuration (`LIVE_API_URL`) before probing.
 
 ## 4. Restore drill proves servability
 

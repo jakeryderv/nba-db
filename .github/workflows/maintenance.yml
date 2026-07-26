@@ -162,53 +162,28 @@ jobs:
             --season=2025-26
             --source=.
 
-      - name: Reconcile maintenance alerts
-        # Alert state is keyed to the operation, not to the workflow. The two
-        # schedules run different operations, so a single shared issue title let
-        # a successful backup close a failed restore drill's alert -- and the
-        # close comment asserted a resolution that had not happened. The next
-        # restore signal is a month away, so that silence is expensive.
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          BACKUP_RAN: ${{ steps.mode.outputs.backup }}
-          RESTORE_RAN: ${{ steps.mode.outputs.restore }}
-          BACKUP_OUTCOME: ${{ steps.backup.outcome }}
-          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
-          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
-        run: |
-          gh label create production-alert --color D73A4A \
-            --description "Automated production operations require attention" --force
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      # Alert state is keyed to the operation, not to the workflow. The two
+      # schedules run different operations, so a single shared issue title let
+      # a successful backup close a failed restore drill's alert -- and the
+      # close comment asserted a resolution that had not happened. The next
+      # restore signal is a month away, so that silence is expensive.
+      #
+      # These steps need the checkout above, so a job that dies before it
+      # reconciles nothing. That gap is covered from outside: production-watch
+      # asserts backup freshness on its own schedule, so a maintenance run that
+      # fails this early still surfaces within the maximum backup age.
+      - name: Reconcile backup alert
+        if: always() && steps.mode.outputs.backup == 'true'
+        uses: ./.github/actions/reconcile-alert
+        with:
+          title: Production backup failed
+          passed: ${{ steps.backup.outcome == 'success' }}
+          token: ${{ github.token }}
 
-          reconcile() {
-            title="$1"
-            passed="$2"
-            issue="$(gh issue list --state open --label production-alert \
-              --search "$title in:title" --json number --jq '.[0].number // empty')"
-            if [ "$passed" = "true" ]; then
-              if [ -n "$issue" ]; then
-                gh issue close "$issue" --comment "Resolved by successful run $run_url"
-              fi
-            elif [ -n "$issue" ]; then
-              gh issue comment "$issue" --body "Failed again: $run_url"
-            else
-              gh issue create --title "$title" --label production-alert \
-                --body "Investigate the run: $run_url"
-            fi
-          }
-
-          if [ "$BACKUP_RAN" = "true" ]; then
-            if [ "$BACKUP_OUTCOME" = "success" ]; then passed=true; else passed=false; fi
-            reconcile "Production backup failed" "$passed"
-          fi
-
-          if [ "$RESTORE_RAN" = "true" ]; then
-            if [ "$DOWNLOAD_OUTCOME" = "success" ] && [ "$RESTORE_OUTCOME" = "success" ]; then
-              passed=true
-            else
-              passed=false
-            fi
-            reconcile "Production restore drill failed" "$passed"
-          fi
+      - name: Reconcile restore drill alert
+        if: always() && steps.mode.outputs.restore == 'true'
+        uses: ./.github/actions/reconcile-alert
+        with:
+          title: Production restore drill failed
+          passed: ${{ steps.download.outcome == 'success' && steps.restore.outcome == 'success' }}
+          token: ${{ github.token }}
