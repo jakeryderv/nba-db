@@ -61,9 +61,20 @@ Railway's edge CIDRs would let uvicorn walk the list correctly, but that list
 is not a stable published contract, and a stale list silently degrades to
 trusting the wrong hop.
 
-*Verification required before merge:* confirm against production that Railway's
-edge appends rather than passes through. Until observed, this is an inference
-from proxy convention, and the whole design rests on it. See Open Questions.
+*Verified (2026-07-26), partially.* Deploy logs show uvicorn's peer address as
+`100.64.0.2`, a CGNAT-range internal address: all ingress arrives through
+Railway's edge and the service is not directly reachable. The forwarded chain
+itself is visible in no available log — Railway's HTTP logs are not exposed for
+this deployment — so append-vs-replace was not read directly.
+
+That distinction turns out not to matter: the rightmost hop is the client under
+**both** behaviors (`forged, client` when appending; `client` when replacing).
+The derivation fails only under pure pass-through, which no reverse proxy does,
+and under which the previous leftmost-keyed code was equally broken. What is
+left is instrumentation rather than assumption: the middleware logs the chain
+depth on first request and warns whenever it is shorter than the configured
+hop count, so a wrong value announces itself instead of silently collapsing
+every caller into one budget.
 
 ### Cap the limiter by evicting least-recently-used keys, not by rejecting
 
@@ -153,9 +164,9 @@ first-request error — which is the desired behavior given deploys are gated on
 
 ## Open Questions
 
-- Does Railway's edge append to `X-Forwarded-For`, or replace it? The design is
-  correct either way, but the number of trusted hops depends on the answer, and
-  it must be observed rather than assumed. Resolve by inspecting request logs
-  from production before merging.
+- ~~Does Railway's edge append to `X-Forwarded-For`, or replace it?~~ Resolved
+  as far as it can be from outside: ingress is edge-only, and the derivation is
+  correct under both behaviors. The configured depth is now self-reporting, so
+  production confirms it on the next deploy (task 9.6).
 - Should `/api/telemetry` (the one non-GET route) keep a separate budget from
   read traffic? It is currently limited in the same group as reads.

@@ -136,11 +136,41 @@ def _client_key(request: Request, trusted_hops: int = 1) -> str:
     """
     forwarded = request.headers.get("x-forwarded-for", "")
     hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+    _observe_forwarding(len(hops), trusted_hops)
     if len(hops) >= trusted_hops >= 1:
         return hops[-trusted_hops][:100]
     # No header, or a chain shorter than the expected proxy depth: the header
     # is absent or forged, so fall back to the peer we can actually observe.
     return request.client.host[:100] if request.client else "unknown"
+
+
+_forwarding_observed = False
+
+
+def _observe_forwarding(chain_length: int, trusted_hops: int) -> None:
+    """Report the forwarding depth once, and warn whenever it is too short.
+
+    The hop count is a deployment fact this code cannot verify for itself. The
+    first request records the depth actually observed, so the configured value
+    can be checked against production rather than assumed; a chain shorter than
+    the configured depth means the limiter is falling back to the peer address
+    and every caller is sharing one budget, which is worth knowing immediately.
+    """
+    global _forwarding_observed
+    if not _forwarding_observed:
+        _forwarding_observed = True
+        logger.info(
+            "Forwarded-for depth observed: chain_length=%d trusted_hops=%d",
+            chain_length,
+            trusted_hops,
+        )
+    if chain_length < trusted_hops:
+        logger.warning(
+            "Forwarded-for chain shorter than TRUSTED_PROXY_HOPS "
+            "(chain_length=%d trusted_hops=%d); rate limiting is keyed on the peer address",
+            chain_length,
+            trusted_hops,
+        )
 
 
 def _apply_response_policy(request: Request, response: Response, elapsed_ms: float) -> None:

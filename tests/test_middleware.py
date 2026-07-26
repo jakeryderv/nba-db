@@ -63,12 +63,12 @@ def test_telemetry_posts_share_the_bounded_api_budget(monkeypatch) -> None:
     assert limited.status_code == 429
 
 
-def _limited_app(monkeypatch, path: str = "/api/example", **env: str):
+def _limited_app(monkeypatch, path: str = "/api/example", env: dict[str, str] | None = None):
     """Build an app whose single route is rate limited to one request."""
     from app.middleware import RequestPolicyMiddleware
 
     monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1")
-    for name, value in env.items():
+    for name, value in (env or {}).items():
         monkeypatch.setenv(name, value)
     application = FastAPI()
     application.add_middleware(RequestPolicyMiddleware)
@@ -180,3 +180,18 @@ def test_security_headers_are_applied(monkeypatch) -> None:
     assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
     assert "camera=()" in response.headers["permissions-policy"]
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_short_forwarding_chain_is_reported(monkeypatch, caplog) -> None:
+    """A chain shorter than the configured depth means every caller shares a budget."""
+    import app.middleware as mw
+
+    monkeypatch.setattr(mw, "_forwarding_observed", False)
+    application = _limited_app(monkeypatch, env={"TRUSTED_PROXY_HOPS": "2"})
+
+    with caplog.at_level("INFO", logger="uvicorn.error"), TestClient(application) as client:
+        client.get("/api/example", headers={"X-Forwarded-For": "203.0.113.7"})
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("chain_length=1 trusted_hops=2" in message for message in messages)
+    assert any("keyed on the peer address" in message for message in messages)

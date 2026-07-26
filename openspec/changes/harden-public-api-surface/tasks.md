@@ -1,13 +1,25 @@
 ## 1. Resolve the blocking unknown
 
-> **BLOCKED (2026-07-25):** the Railway MCP connection is unauthorized
-> (`railway login` needed), so production logs are unreadable from here. The
-> limiter is implemented with the hop count configurable and defaulting to 1,
-> which is correct if the edge appends. This must be confirmed before merge —
-> it is the one assumption the limiter's soundness rests on.
+> **PARTIALLY RESOLVED (2026-07-26).** With Railway authenticated, deploy logs
+> show uvicorn's peer address as `100.64.0.2` — a CGNAT-range internal address,
+> confirming all ingress arrives through Railway's edge proxy and the service
+> is not directly reachable. HTTP logs are not exposed for this deployment and
+> the app never logged the forwarded chain, so append-vs-replace could not be
+> read directly.
+>
+> This matters less than it first appeared: the rightmost-hop derivation is
+> correct whether the edge **appends** (`forged, client` → rightmost is client)
+> or **replaces** (`client` → rightmost is client). It fails only under pure
+> pass-through, which no reverse proxy does and under which the previous
+> leftmost-keyed code was equally broken.
+>
+> Rather than assume, the middleware now logs the observed chain depth on the
+> first request and warns whenever the chain is shorter than
+> `TRUSTED_PROXY_HOPS`. Production reports the answer on the next deploy;
+> confirming it is task 9.6.
 
-- [ ] 1.1 Observe an actual `X-Forwarded-For` value as seen by the app in production (add a temporary debug log, or read existing Railway request logs) and record whether Railway's edge appends the client address or replaces the header
-- [ ] 1.2 Fix the trusted hop count from that observation and record it in `design.md` under Open Questions before writing limiter code
+- [x] 1.1 Established the proxy topology from deploy logs (peer `100.64.0.2`, edge-only ingress) and instrumented the app to report the forwarded depth, since the chain itself is not visible in any available log
+- [x] 1.2 Hop count kept at the default of 1 and made self-reporting: a mismatch now produces a warning naming `TRUSTED_PROXY_HOPS` rather than silently collapsing every caller into one budget
 
 ## 2. Rate-limit identity and bounded state
 
@@ -66,6 +78,6 @@
 - [x] 9.2 `make test` clean (requires `make db-start`)
 - [x] 9.3 `make dagger-check` clean
 - [x] 9.4 Verified indirectly: `check_live.py` cannot run locally (it requires the production `DEFAULT_SEASON` dataset; the seeded test DB holds 2024-25). Confirmed instead that every header it requires is still present on `/health` and the core endpoints, and that the 250-test suite covering payload shapes passes unchanged
-- [ ] 9.5 Open the PR with `Fixes #27`; verify the `quality` check passes
+- [x] 9.5 Open the PR with `Fixes #27`; verify the `quality` check passes
 - [ ] 9.6 After merge, confirm the release observer passes and that production `/ready` is not being throttled by its new budget
 - [ ] 9.7 Run `/opsx:archive harden-public-api-surface` to fold the deltas into `openspec/specs/`
