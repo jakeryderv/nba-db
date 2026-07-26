@@ -60,6 +60,13 @@ This is an exact one-season replacement: all other local season rows are removed
 
 ## 3. Promote with backup and typed confirmations
 
+Promotion refuses a season that staging is not already serving. Before anything
+is modified, it reads staging's dataset status and requires the same manifest
+digest, a passing verification status, and matching counts. Staging being
+unreachable blocks the promotion rather than being treated as permission, so
+`STAGING_API_URL` must be set and step 2 must have been run for this exact
+artifact.
+
 Promotion requires the dedicated `PRODUCTION_DATABASE_URL` environment variable. It is never accepted as a CLI argument and is intentionally distinct from the app's ordinary `DATABASE_URL`. Read the secret without echoing it or storing it in shell history:
 
 ```bash

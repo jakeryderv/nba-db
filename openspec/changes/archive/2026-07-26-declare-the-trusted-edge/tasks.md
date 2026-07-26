@@ -14,8 +14,8 @@
 
 ## 3. Rollout
 
-- [ ] 3.1 **Operator, before merge:** set `TRUSTED_EDGE=cloudflare` on the production service
+- [x] 3.1 `TRUSTED_EDGE=cloudflare` set on the production service before merge; staging deliberately left undeclared
 - [x] 3.2 Leave staging undeclared, which is what restores correct limiting there
 - [x] 3.3 `make check`, `make test`, `make dagger-check`
-- [ ] 3.4 Merge only after 3.1, then confirm no forwarded-depth warnings appear in production logs
-- [ ] 3.5 Archive the change
+- [x] 3.4 Merged as `b7bf724`. Production serves that revision and logs zero forwarded-depth observations, which is positive evidence the declared-edge path is in use — the observation only runs on the positional fallback
+- [x] 3.5 Archive the change

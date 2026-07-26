@@ -1011,6 +1011,7 @@ def test_promotion_main_holds_lock_across_backup_replace_and_smoke(
         lambda *_args, **_kwargs: events.append("replace"),
     )
     monkeypatch.setattr(lifecycle, "verify_live_api", lambda *_args: events.append("smoke"))
+    monkeypatch.setattr(lifecycle, "verify_staged", lambda *_args: events.append("staged"))
 
     result = lifecycle.main(
         [
@@ -1027,13 +1028,18 @@ def test_promotion_main_holds_lock_across_backup_replace_and_smoke(
             "DELETE OTHER SEASONS",
             "--backup-file",
             str(tmp_path / "backup.dump"),
+            "--staging-api-url",
+            "https://staging.example.com",
             "--api-url",
             "https://api.example.com",
         ]
     )
 
     assert result == 0
+    # The staging gate runs before the lock is taken, so a failure there costs
+    # no backup and holds no lock.
     assert events == [
+        "staged",
         "lock",
         "backup",
         "replacement-connect",
@@ -1288,3 +1294,57 @@ def test_live_api_smoke_rejects_wrong_game_identity(valid_root: Path) -> None:
 
     assert exc_info.value.__cause__ is not None
     assert "games response" in str(exc_info.value.__cause__)
+
+
+def test_promotion_requires_the_season_to_be_staged_first() -> None:
+    """The checklist always said to stage first; nothing enforced it."""
+    verify_staged = lifecycle.verify_staged
+    PromotionSafetyError = lifecycle.PromotionSafetyError
+    # verify_staged reads only these three attributes of the dataset.
+    dataset = SimpleNamespace(
+        season=SEASON,
+        manifest_sha256="a" * 64,
+        counts={"games": 3, "shot_attempts": 12},
+    )
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return self.payload
+
+    # Staging serving a different manifest is not a rehearsal of this dataset.
+    def wrong_manifest(url, **_kwargs):
+        return Response(
+            {
+                "manifest_sha256": "f" * 64,
+                "verification_status": "passed",
+                "counts": dataset.counts,
+            }
+        )
+
+    with pytest.raises(PromotionSafetyError, match="not serving this manifest"):
+        verify_staged("https://staging.example.com", dataset, get=wrong_manifest)
+
+    # Unreachable staging blocks promotion rather than being treated as absent.
+    def unreachable(url, **_kwargs):
+        raise RuntimeError("connection refused")
+
+    with pytest.raises(PromotionSafetyError, match="could not be reached"):
+        verify_staged("https://staging.example.com", dataset, get=unreachable)
+
+    # Matching manifest, verification, and counts satisfies the gate.
+    def staged(url, **_kwargs):
+        return Response(
+            {
+                "manifest_sha256": dataset.manifest_sha256,
+                "verification_status": "passed",
+                "counts": dataset.counts,
+            }
+        )
+
+    verify_staged("https://staging.example.com", dataset, get=staged)

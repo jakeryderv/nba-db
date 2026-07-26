@@ -1348,6 +1348,54 @@ def _smoke_once(api_url: str, dataset: SeasonDataset, get: Callable[..., Any]) -
         raise SeasonLifecycleError("Live leaders response does not match the promoted season")
 
 
+def verify_staged(
+    api_url: str,
+    dataset: SeasonDataset,
+    *,
+    get: Callable[..., Any] = requests.get,
+) -> None:
+    """Require that staging is already serving exactly this dataset.
+
+    The release checklist has always said to stage before promoting, but nothing
+    enforced it, so the rehearsal was honor-system: a season could go straight to
+    production having never been loaded anywhere else.
+
+    This asks staging what it is serving rather than trusting a flag. A caller
+    cannot satisfy it by asserting the step happened -- staging has to actually
+    hold this manifest, with the same counts, verified. That makes the check
+    evidence rather than ceremony.
+    """
+    request_options = {
+        "timeout": 10,
+        "headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    }
+    url = api_url.rstrip("/")
+    try:
+        response = get(
+            f"{url}/api/dataset-status",
+            params={"season": dataset.season},
+            **request_options,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:
+        raise PromotionSafetyError(
+            "Promotion requires a staged season, and staging could not be reached"
+        ) from exc
+    if body.get("manifest_sha256") != dataset.manifest_sha256:
+        raise PromotionSafetyError(
+            "Staging is not serving this manifest; stage this season before promoting"
+        )
+    if body.get("verification_status") != "passed":
+        raise PromotionSafetyError("Staging has not verified this season")
+    counts = body.get("counts") or {}
+    for name in ("games", "shot_attempts"):
+        if counts.get(name) != dataset.counts[name]:
+            raise PromotionSafetyError(
+                f"Staging {name} count does not match the dataset being promoted"
+            )
+
+
 def verify_live_api(
     api_url: str,
     dataset: SeasonDataset,
@@ -1405,6 +1453,7 @@ def _parser() -> argparse.ArgumentParser:
     promote.add_argument("--confirm-single-season", required=True)
     promote.add_argument("--backup-file", type=Path, required=True)
     promote.add_argument("--api-url", required=True)
+    promote.add_argument("--staging-api-url", required=True)
     return parser
 
 
@@ -1453,7 +1502,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         config = production_db_config(args.target, args.season, args.confirm_season)
         api_url = _production_api_url(args.api_url)
+        staging_api_url = _staging_api_url(args.staging_api_url)
         dataset = verify_manifest(args.clean_root, args.season)
+        # Before anything destructive: staging must already be serving this
+        # dataset. Checked outside the operation lock so a failure costs
+        # nothing and holds nothing.
+        verify_staged(staging_api_url, dataset)
         with promotion_operation_lock(config):
             create_backup(config, args.backup_file)
             with psycopg.connect(**config) as conn:

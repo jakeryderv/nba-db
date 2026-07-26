@@ -111,6 +111,7 @@ make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 | `DATABASE_URL` | Application/development connection string (takes precedence; used on Railway) |
 | `PRODUCTION_DATABASE_URL` | Promotion and scheduled-backup connection string; keep only in operator shells or the encrypted GitHub Actions secret |
 | `STAGING_DATABASE_URL` | Staging-only connection string for the guarded staging load |
+| `STAGING_API_URL` | Staging's public HTTPS URL. Required for promotion: production refuses a dataset staging is not already serving |
 | `RECOVERY_DATABASE_URL` | Drill-only connection string whose database name ends in `_recovery` |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` | Individual settings for local development |
 | `READONLY_DB_PASSWORD` | Optional. When set, `init_db.py` provisions a SELECT-only `nba_readonly` role and the web app connects as it |
