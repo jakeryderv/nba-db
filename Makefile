@@ -122,6 +122,7 @@ require-promotion: require-season
 	@test "$(CONFIRM_SINGLE_SEASON)" = "DELETE OTHER SEASONS" || (echo "ERROR: type CONFIRM_SINGLE_SEASON='DELETE OTHER SEASONS'" && exit 2)
 	@test -n "$(strip $(BACKUP_FILE))" || (echo "ERROR: set BACKUP_FILE to a new protected backup path" && exit 2)
 	@test -n "$(strip $(API_URL))" || (echo "ERROR: set API_URL to the credential-free production HTTPS URL" && exit 2)
+	@test -n "$(strip $(STAGING_API_URL))" || (echo "ERROR: set STAGING_API_URL; promotion requires the season to be staged first" && exit 2)
 	@test "$(origin PRODUCTION_DATABASE_URL)" != "command line" || (echo "ERROR: export PRODUCTION_DATABASE_URL; do not pass it as a make argument" && exit 2)
 	@test -n "$$PRODUCTION_DATABASE_URL" || (echo "ERROR: export PRODUCTION_DATABASE_URL in the environment" && exit 2)
 
@@ -158,7 +159,8 @@ season-promote: require-promotion
 		--confirm-season "$(CONFIRM_SEASON)" \
 		--confirm-single-season "$(CONFIRM_SINGLE_SEASON)" \
 		--backup-file "$(BACKUP_FILE)" \
-		--api-url "$(API_URL)"
+		--api-url "$(API_URL)" \
+		--staging-api-url "$(STAGING_API_URL)"
 
 refresh: season-build
 	$(MAKE) season-load-local SEASON="$(SEASON)"
