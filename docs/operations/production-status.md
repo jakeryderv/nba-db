@@ -1,6 +1,23 @@
 # Production Operations Record
 
-Last verified: 2026-07-22
+Last verified: 2026-07-26
+
+## Edge and DNS
+
+- `nba.jvs.sh` is a Cloudflare-proxied `CNAME` to `5kr2j4o6.up.railway.app`
+  (record `5c144c57d73860e5d0323ccb36131cb4`, zone `jvs.sh`). Proxying was
+  enabled 2026-07-26; setting `proxied=false` on that record reverts the
+  topology in one edit.
+- Traffic path is Cloudflare edge, then Railway edge, then the app. The rate
+  limiter keys on `CF-Connecting-IP` accordingly; `TRUSTED_PROXY_HOPS` is the
+  fallback for the non-proxied path and stays at `1`.
+- Static assets are served from Cloudflare's cache (`cf-cache-status: HIT`).
+  `/api/` responses are `DYNAMIC` and must stay uncached, so release
+  verification reads the origin rather than a cached response.
+- Cloudflare features that rewrite response bodies must stay off. Web Analytics
+  RUM auto-injection was enabled and was disabled on 2026-07-26: it injected a
+  beacon script that the app's `script-src 'self'` policy blocked on every page
+  load. Server-side Cloudflare analytics are unaffected and still available.
 
 ## Deployment baseline
 
