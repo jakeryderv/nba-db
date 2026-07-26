@@ -13,9 +13,10 @@ from scripts.upload_backup import prune_backups, upload_backup
 class FakeArchiveCheck:
     """Stand-in for subprocess.run inspecting the archive with pg_restore."""
 
-    def __init__(self, returncode: int = 0, missing: bool = False) -> None:
+    def __init__(self, returncode: int = 0, missing: bool = False, stderr: str = "") -> None:
         self.returncode = returncode
         self.missing = missing
+        self.stderr = stderr
         self.commands: list[list[str]] = []
 
     def __call__(self, command: list[str], **_kwargs) -> "FakeArchiveCheck":
@@ -209,3 +210,29 @@ def test_latest_backup_download_verifies_checksum_metadata(tmp_path: Path) -> No
 
     assert output.read_bytes() == payload
     assert result["manifest_sha256"] == "b" * 64
+
+
+def test_upload_backup_reports_why_inspection_failed(tmp_path: Path) -> None:
+    """A validator too old to read the archive must not look like a bad backup.
+
+    This is the failure that actually occurred: a PostgreSQL 16 client rejecting
+    a v18 dump. Without pg_restore's own reason in the message, the alert reads
+    as a corrupt backup and the investigation starts in the wrong place.
+    """
+    backup = tmp_path / "production.dump"
+    backup.write_bytes(b"database backup")
+    client = FakeS3()
+
+    with pytest.raises(ArtifactArchiveError, match="unsupported version"):
+        upload_backup(
+            backup,
+            season="2025-26",
+            manifest_sha256="b" * 64,
+            client=client,
+            bucket="nba-db-artifacts",
+            runner=FakeArchiveCheck(
+                returncode=1,
+                stderr="pg_restore: error: unsupported version (1.16) in file header\n",
+            ),
+        )
+    assert client.uploads == []

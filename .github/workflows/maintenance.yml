@@ -98,7 +98,24 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-18
-          pg_restore --version
+          # Installing the client is not enough: the runner ships a PostgreSQL 16
+          # client at /usr/bin/pg_restore, and the new binaries land in a
+          # versioned directory that is not on PATH. Without this, validation
+          # runs v16 against a v18 archive and rejects a perfectly good backup.
+          # GITHUB_PATH applies to subsequent steps, so the assertion follows.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Verify the validator can read PostgreSQL 18 archives
+        if: steps.mode.outputs.backup == 'true'
+        run: |
+          resolved="$(command -v pg_restore)"
+          version="$(pg_restore --version | awk '{print $3}' | cut -d. -f1)"
+          echo "pg_restore: $resolved (major $version)"
+          if [ "$version" -lt 18 ]; then
+            echo "::error::pg_restore $version cannot inspect a PostgreSQL 18 archive." \
+              "Backup validation would reject a valid dump. Check PATH ordering." >&2
+            exit 1
+          fi
 
       - name: Create, upload, and retain production backup
         if: steps.mode.outputs.backup == 'true'

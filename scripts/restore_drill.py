@@ -106,7 +106,11 @@ def run_restore_drill(
         check=False,
     )
     if archive_check.returncode != 0:
-        raise RestoreDrillError("Backup archive could not be inspected")
+        # Same reasoning as upload_backup: distinguish an unreadable archive
+        # from a validator too old to read it.
+        detail = (archive_check.stderr or "").strip().splitlines()
+        reason = detail[-1].strip() if detail else "pg_restore gave no reason"
+        raise RestoreDrillError(f"Backup archive could not be inspected: {reason}")
     try:
         with psycopg.connect(**maintenance_config, autocommit=True) as conn:
             with conn.cursor() as cur:
