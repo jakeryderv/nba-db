@@ -28,7 +28,8 @@ Last verified: 2026-07-26
   `3b1575e1-b1ca-4ee8-b57b-88e0923ed3c0`, status `SUCCESS`, commit
   `810c444aa1a307fc72089f2bba638da5bfee246d`.
 - Staging app and its isolated PostgreSQL 18 service are running in the Railway `staging`
-  environment.
+  environment, deploying from `main` alongside production. Staging rehearses data
+  promotion and deliberately does not gate code deploys; see [Deployment](deployment.md).
 
 ## Verified dataset
 

@@ -28,6 +28,8 @@ that are not inferable from the code.
 - No AI attribution or `Co-Authored-By` lines in commit messages.
 - Merging to `main` deploys to production: Railway picks up the commit, gated by the
   `/ready` healthcheck, and the release observer verifies the live contract afterward.
+  Staging deploys from `main` too and does not gate code — there is no staging step to
+  take before a merge. It rehearses data promotion only; see `docs/operations/deployment.md`.
 
 ## Commands
 
