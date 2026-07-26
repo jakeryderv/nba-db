@@ -52,6 +52,10 @@ that alters a specced invariant should start with a change proposal
 (`openspec new change`, or `/opsx:propose` if you use Claude Code). Small fixes
 do not need one.
 
+Archive a completed change with `make openspec-archive CHANGE=<name>` rather
+than calling `openspec archive` directly — the CLI omits trailing newlines on
+the spec files it rewrites, and the target normalizes them.
+
 Absence of a spec means the code and README are authoritative for that area, not
 that anything goes.
 

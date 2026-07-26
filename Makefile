@@ -1,4 +1,4 @@
-.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-stage season-promote require-season require-staging require-promotion live-check restore-drill artifact-archive artifact-upload backup-upload test test-data clean seasons status lint format format-check docs typecheck check dagger-check api
+.PHONY: help install hooks-install hooks-run pre-push db-start db-stop db-reset db-shell db-logs extract transform verify-official refresh season-build season-load-local season-stage season-promote require-season require-staging require-promotion live-check restore-drill artifact-archive artifact-upload backup-upload test test-data clean seasons status lint format format-check docs typecheck check dagger-check api openspec-archive
 
 # Configuration
 SEASON ?= 2025-26
@@ -211,6 +211,16 @@ format-check:
 
 docs:
 	uv run python scripts/check_docs.py
+
+# `openspec archive` writes spec files without a trailing newline, which trips
+# the end-of-file pre-commit hook and aborts the first commit attempt every
+# time. Normalizing here keeps the hook meaningful instead of excluding the
+# directory from it.
+openspec-archive:
+	@test -n "$(strip $(CHANGE))" || (echo "ERROR: set CHANGE=<change-name>" && exit 2)
+	openspec archive "$(CHANGE)" --yes
+	@uv run python -c "import pathlib; [p.write_text(p.read_text().rstrip() + chr(10)) for p in pathlib.Path('openspec').rglob('*.md')]"
+	@echo "Archived $(CHANGE); trailing newlines normalized."
 
 typecheck:
 	uv run mypy etl/ app/ db/ scripts/ nba_config.py
