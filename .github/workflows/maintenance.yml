@@ -118,6 +118,7 @@ jobs:
           fi
 
       - name: Create, upload, and retain production backup
+        id: backup
         if: steps.mode.outputs.backup == 'true'
         env:
           PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
@@ -140,6 +141,7 @@ jobs:
             --minimum-copies 7
 
       - name: Download newest verified backup
+        id: download
         if: steps.mode.outputs.restore == 'true'
         run: |
           install -d -m 700 .maintenance
@@ -148,6 +150,7 @@ jobs:
             --output-file .maintenance/latest.dump
 
       - name: Restore and verify in isolated PostgreSQL 18
+        id: restore
         if: steps.mode.outputs.restore == 'true'
         uses: dagger/dagger-for-github@v8.4.0
         with:
@@ -159,33 +162,53 @@ jobs:
             --season=2025-26
             --source=.
 
-      - name: Close resolved maintenance alert
-        if: success()
+      - name: Reconcile maintenance alerts
+        # Alert state is keyed to the operation, not to the workflow. The two
+        # schedules run different operations, so a single shared issue title let
+        # a successful backup close a failed restore drill's alert -- and the
+        # close comment asserted a resolution that had not happened. The next
+        # restore signal is a month away, so that silence is expensive.
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BACKUP_RAN: ${{ steps.mode.outputs.backup }}
+          RESTORE_RAN: ${{ steps.mode.outputs.restore }}
+          BACKUP_OUTCOME: ${{ steps.backup.outcome }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
         run: |
           gh label create production-alert --color D73A4A \
             --description "Automated production operations require attention" --force
-          issue_number="$(gh issue list --state open --label production-alert \
-            --search 'Production maintenance failed in:title' --json number --jq '.[0].number // empty')"
-          if [ -n "$issue_number" ]; then
-            gh issue close "$issue_number" --comment "Resolved by successful maintenance run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          reconcile() {
+            title="$1"
+            passed="$2"
+            issue="$(gh issue list --state open --label production-alert \
+              --search "$title in:title" --json number --jq '.[0].number // empty')"
+            if [ "$passed" = "true" ]; then
+              if [ -n "$issue" ]; then
+                gh issue close "$issue" --comment "Resolved by successful run $run_url"
+              fi
+            elif [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "Failed again: $run_url"
+            else
+              gh issue create --title "$title" --label production-alert \
+                --body "Investigate the run: $run_url"
+            fi
+          }
+
+          if [ "$BACKUP_RAN" = "true" ]; then
+            if [ "$BACKUP_OUTCOME" = "success" ]; then passed=true; else passed=false; fi
+            reconcile "Production backup failed" "$passed"
           fi
 
-      - name: Open maintenance alert
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh label create production-alert --color D73A4A \
-            --description "Automated production operations require attention" --force
-          issue_number="$(gh issue list --state open --label production-alert \
-            --search 'Production maintenance failed in:title' --json number --jq '.[0].number // empty')"
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          if [ -n "$issue_number" ]; then
-            gh issue comment "$issue_number" --body "Maintenance failed again: $run_url"
-          else
-            gh issue create --title "Production maintenance failed" \
-              --label production-alert \
-              --body "The scheduled backup or restore drill failed. Investigate the run: $run_url"
+          if [ "$RESTORE_RAN" = "true" ]; then
+            if [ "$DOWNLOAD_OUTCOME" = "success" ] && [ "$RESTORE_OUTCOME" = "success" ]; then
+              passed=true
+            else
+              passed=false
+            fi
+            reconcile "Production restore drill failed" "$passed"
           fi

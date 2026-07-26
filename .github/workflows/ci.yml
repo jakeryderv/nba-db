@@ -13,7 +13,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run on main: Railway deploys that commit regardless, so a
+  # cancelled run means the post-merge pipeline never verified what shipped.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   quality:

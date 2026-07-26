@@ -16,9 +16,13 @@ concurrency:
 
 jobs:
   verify:
+    # A cancelled CI run says nothing about the release. Observing it would
+    # report a healthy deploy as broken; CI no longer cancels main runs, so a
+    # cancellation here means the run was superseded or stopped deliberately.
     if: >-
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -84,6 +88,7 @@ jobs:
         if: steps.state.outputs.healthy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh label create production-alert --color D73A4A \
             --description "Automated production operations require attention" --force
@@ -97,6 +102,10 @@ jobs:
         if: steps.state.outputs.healthy != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Without a checkout gh cannot infer the repository, and the checkout
+          # above only runs when CI succeeded -- so this alert could not file
+          # itself on a CI failure, the case it most exists to report.
+          GH_REPO: ${{ github.repository }}
           REASON: ${{ steps.state.outputs.reason }}
         run: |
           gh label create production-alert --color D73A4A \
