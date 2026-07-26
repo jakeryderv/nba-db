@@ -319,7 +319,7 @@ make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 | `RATE_LIMIT_READY_REQUESTS` | Per-client `/ready` requests per window (default `600`), budgeted separately so public traffic cannot throttle the platform healthcheck |
 | `RATE_LIMIT_WINDOW_SECONDS` | Sliding rate-limit window (default `60`) |
 | `RATE_LIMIT_MAX_CLIENTS` | Cap on tracked client/group entries before least-recently-used eviction (default `10000`) |
-| `TRUSTED_PROXY_HOPS` | Hops appended by trusted proxies, counted from the right of `X-Forwarded-For` (default `1`, Railway's edge) |
+| `TRUSTED_PROXY_HOPS` | Hops appended by trusted proxies, counted from the right of `X-Forwarded-For` (default `1`, Railway's edge). Only consulted when `CF-Connecting-IP` is absent: a proxy-set header the edge overwrites on every request is preferred, because it stays correct when a proxy layer is added and a counted position does not |
 
 ## Deployment
 

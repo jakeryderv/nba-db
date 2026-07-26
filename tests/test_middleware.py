@@ -195,3 +195,145 @@ def test_short_forwarding_chain_is_reported(monkeypatch, caplog) -> None:
     messages = [record.getMessage() for record in caplog.records]
     assert any("chain_length=1 trusted_hops=2" in message for message in messages)
     assert any("keyed on the peer address" in message for message in messages)
+
+
+def test_proxy_attributed_header_takes_precedence(monkeypatch) -> None:
+    """CF-Connecting-IP wins over the forwarding chain when both are present."""
+    application = _limited_app(monkeypatch)
+
+    with TestClient(application) as client:
+        # Same attributed client, different chains: one shared budget.
+        first = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "1.1.1.1, 9.9.9.9"},
+        )
+        second = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "2.2.2.2, 8.8.8.8"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_proxy_attributed_clients_keep_independent_budgets(monkeypatch) -> None:
+    """Behind one edge, distinct callers must not share a budget."""
+    application = _limited_app(monkeypatch)
+    # Both arrive via the same edge address; only the attributed client differs.
+    chain = "198.51.100.1"
+
+    with TestClient(application) as client:
+        first = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": chain},
+        )
+        second = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.8", "X-Forwarded-For": chain},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_malformed_attributed_header_falls_through(monkeypatch) -> None:
+    """A value that is not an address must not become a key of its own."""
+    application = _limited_app(monkeypatch)
+
+    with TestClient(application) as client:
+        first = client.get(
+            "/api/example",
+            headers={
+                "CF-Connecting-IP": "not-an-address",
+                "X-Forwarded-For": "1.1.1.1, 203.0.113.7",
+            },
+        )
+        second = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "x" * 300, "X-Forwarded-For": "2.2.2.2, 203.0.113.7"},
+        )
+
+    # Both fell through to the forwarded hop, which is the same for each.
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_behavior_without_the_header_is_unchanged(monkeypatch) -> None:
+    """The pre-flip path must not regress: this is today's behavior exactly."""
+    application = _limited_app(monkeypatch)
+
+    with TestClient(application) as client:
+        first = client.get("/api/example", headers={"X-Forwarded-For": "1.1.1.1, 203.0.113.7"})
+        second = client.get("/api/example", headers={"X-Forwarded-For": "9.9.9.9, 203.0.113.7"})
+        other = client.get("/api/example", headers={"X-Forwarded-For": "203.0.113.8"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert other.status_code == 200
+
+
+def test_two_hop_chain_without_the_header_degrades_not_collapses(monkeypatch) -> None:
+    """A partial rollout -- proxy in front, header missing -- must still separate callers.
+
+    With hops=2 the client sits two from the right, so distinct callers behind
+    the same edge keep distinct keys.
+    """
+    application = _limited_app(monkeypatch, env={"TRUSTED_PROXY_HOPS": "2"})
+
+    with TestClient(application) as client:
+        first = client.get("/api/example", headers={"X-Forwarded-For": "203.0.113.7, 198.51.100.1"})
+        second = client.get(
+            "/api/example", headers={"X-Forwarded-For": "203.0.113.8, 198.51.100.1"}
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_internal_probe_logs_no_forwarding_warning(monkeypatch, caplog) -> None:
+    """The platform's readiness probe has no forwarding header by design.
+
+    Warning about it would assert a degradation that is not happening, and
+    because the probe is the first request an instance serves, it would also be
+    the request the observed depth got reported from.
+    """
+    import app.middleware as mw
+
+    monkeypatch.setattr(mw, "_forwarding_observed", False)
+    application = _limited_app(monkeypatch, path="/ready")
+
+    with caplog.at_level("INFO", logger="uvicorn.error"):
+        # Railway's probe reaches the container directly from this range.
+        with TestClient(application, client=("100.64.0.2", 1234)) as client:
+            assert client.get("/ready").status_code == 200
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert not any("Forwarded-for" in message for message in messages), messages
+
+
+def test_public_peer_with_short_chain_still_warns(monkeypatch, caplog) -> None:
+    """Suppression must not hide the case actually worth knowing about."""
+    import app.middleware as mw
+
+    monkeypatch.setattr(mw, "_forwarding_observed", False)
+    application = _limited_app(monkeypatch, path="/ready")
+
+    with caplog.at_level("INFO", logger="uvicorn.error"):
+        with TestClient(application, client=("203.0.113.7", 1234)) as client:
+            assert client.get("/ready").status_code == 200
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("chain_length=0 trusted_hops=1" in message for message in messages)
+    assert any("keyed on the peer address" in message for message in messages)
+
+
+def test_internal_peer_detection() -> None:
+    from app.middleware import _is_internal_peer
+
+    assert _is_internal_peer("100.64.0.2") is True
+    assert _is_internal_peer("100.127.255.254") is True
+    assert _is_internal_peer("127.0.0.1") is True
+    assert _is_internal_peer("::1") is True
+    assert _is_internal_peer("203.0.113.7") is False
+    assert _is_internal_peer("100.128.0.1") is False
+    assert _is_internal_peer("testclient") is False
