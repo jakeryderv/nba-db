@@ -11,6 +11,35 @@ installed during startup. Set `DATABASE_URL` (provided by the Railway Postgres p
 
 Schema migration files are immutable after they have been applied. To change the database, add the next numbered file under `db/schema/`; editing an applied file causes initialization to fail with a checksum error.
 
+## Environments
+
+The Railway project runs `production` and `staging`. Both `nba-api` services deploy from
+`main`, so a merge reaches them within the same second.
+
+**Staging is a rehearsal target for data, not a gate for code.** Its job is
+`make season-stage`. A promotion refuses any dataset staging is not already serving, so
+staging holds the only rehearsal standing between a manifested season and production —
+see [Season lifecycle](season-lifecycle.md).
+
+Code is gated instead by three checks that do not involve staging:
+
+1. The required `quality` check on the pull request, before the merge.
+2. Railway's `/ready` healthcheck, which withholds traffic from a new instance until it
+   proves it is serving a complete, verified season.
+3. The release observer, which waits for production to serve the merged SHA and then
+   reruns the full live contract.
+
+Routing code through staging as a fourth gate was considered and declined. Staging is not
+behind Cloudflare and its smoke test asserts less than the production live check, so it
+cannot rehearse the edge layer or the full contract. It would add a manual promotion step
+to every merge in exchange for a weaker signal than the three checks above already give.
+
+Treat staging as a parity twin: useful for reproducing a problem against production-like
+data, never authoritative about whether a release is safe. If that trade ever changes —
+staging fronted by Cloudflare and brought to smoke-test parity — revisit the decision
+rather than quietly adding the gate, because a documented gate that does not gate is worse
+than no gate.
+
 ## Verified artifact retention
 
 The production Railway project contains the `nba-db-artifacts` S3-compatible bucket. Archive the
