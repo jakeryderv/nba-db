@@ -79,5 +79,5 @@
 - [x] 9.3 `make dagger-check` clean
 - [x] 9.4 Verified indirectly: `check_live.py` cannot run locally (it requires the production `DEFAULT_SEASON` dataset; the seeded test DB holds 2024-25). Confirmed instead that every header it requires is still present on `/health` and the core endpoints, and that the 250-test suite covering payload shapes passes unchanged
 - [x] 9.5 Open the PR with `Fixes #27`; verify the `quality` check passes
-- [ ] 9.6 After merge, confirm the release observer passes and that production `/ready` is not being throttled by its new budget
-- [ ] 9.7 Run `/opsx:archive harden-public-api-surface` to fold the deltas into `openspec/specs/`
+- [x] 9.6 Release observer passed. **`TRUSTED_PROXY_HOPS=1` confirmed against production**: across 26 requests to limited `/api/*` paths, zero short-chain warnings were emitted, so public traffic arrives with a forwarded chain of at least one hop. The only warning came from Railway's internal `/ready` prober, which legitimately carries no forwarded header. `/ready` is not being throttled
+- [x] 9.7 Run `/opsx:archive harden-public-api-surface` to fold the deltas into `openspec/specs/`
