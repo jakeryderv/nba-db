@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
@@ -27,6 +28,11 @@ PERMISSIONS_POLICY = (
 )
 STRICT_TRANSPORT_SECURITY = "max-age=31536000; includeSubDomains"
 EXPENSIVE_PATHS = {"/api/shot-chart", "/api/shot-profile", "/api/shot-chart.csv"}
+
+# Railway reaches the container from this range for internal probes.
+CARRIER_GRADE_NAT = ipaddress.ip_network("100.64.0.0/10")
+# Longest textual IPv6 form, including an IPv4-mapped tail.
+MAX_ADDRESS_LENGTH = 45
 
 # Rate limiting is default-on for the whole surface. Anything not limited is
 # named here, so a new route is covered the day it is added rather than by
@@ -120,8 +126,33 @@ class SlidingWindowLimiter:
             return True, 0
 
 
+def _proxy_attributed_client(request: Request) -> str | None:
+    """Return the client address the nearest proxy attributes, if it set one.
+
+    Cloudflare overwrites CF-Connecting-IP on every proxied request, so unlike a
+    position within X-Forwarded-For it cannot be supplied by the caller at all.
+    It is also stable across topology changes: adding a proxy layer shifts which
+    position in the chain holds the client, but not this header.
+
+    Anything that does not parse as an address is ignored rather than used, so a
+    malformed value falls through to the positional derivation instead of
+    becoming a key of its own.
+    """
+    value = request.headers.get("cf-connecting-ip", "").strip()
+    if not value or len(value) > MAX_ADDRESS_LENGTH:
+        return None
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return None
+    return value
+
+
 def _client_key(request: Request, trusted_hops: int = 1) -> str:
-    """Identify the caller by the hop the trusted edge appended.
+    """Identify the caller by an address they cannot choose.
+
+    Preference order: the address the nearest proxy attributes, then the hop the
+    trusted edge appended, then the peer.
 
     Each proxy appends the peer it received the request from, so a caller can
     prepend entries to X-Forwarded-For but cannot append past the edge. Reading
@@ -134,29 +165,58 @@ def _client_key(request: Request, trusted_hops: int = 1) -> str:
     not otherwise publicly reachable. If the app is ever exposed directly, a
     caller could supply the whole chain and this derivation stops being sound.
     """
+    attributed = _proxy_attributed_client(request)
+    if attributed:
+        return attributed
+
+    peer = request.client.host if request.client else ""
     forwarded = request.headers.get("x-forwarded-for", "")
     hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
-    _observe_forwarding(len(hops), trusted_hops)
+    # Only report on the positional path: it is the only one whose correctness
+    # depends on the configured depth.
+    _observe_forwarding(len(hops), trusted_hops, peer)
     if len(hops) >= trusted_hops >= 1:
         return hops[-trusted_hops][:100]
     # No header, or a chain shorter than the expected proxy depth: the header
     # is absent or forged, so fall back to the peer we can actually observe.
-    return request.client.host[:100] if request.client else "unknown"
+    return peer[:100] if peer else "unknown"
 
 
 _forwarding_observed = False
 
 
-def _observe_forwarding(chain_length: int, trusted_hops: int) -> None:
+def _is_internal_peer(host: str) -> bool:
+    """Whether a peer address belongs to the platform rather than the internet.
+
+    Railway's readiness prober reaches the container directly, from the
+    carrier-grade NAT range, and so legitimately carries no forwarding header.
+    """
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    return address.version == 4 and address in CARRIER_GRADE_NAT
+
+
+def _observe_forwarding(chain_length: int, trusted_hops: int, peer: str) -> None:
     """Report the forwarding depth once, and warn whenever it is too short.
 
     The hop count is a deployment fact this code cannot verify for itself. The
-    first request records the depth actually observed, so the configured value
-    can be checked against production rather than assumed; a chain shorter than
-    the configured depth means the limiter is falling back to the peer address
-    and every caller is sharing one budget, which is worth knowing immediately.
+    first public request records the depth actually observed, so the configured
+    value can be checked against production rather than assumed; a chain shorter
+    than the configured depth means the limiter is falling back to the peer
+    address and every caller is sharing one budget.
+
+    Internal probes are excluded from both. They have no forwarding header by
+    design, so warning about them would assert a degradation that is not
+    happening -- and since a probe is usually the very first request an instance
+    serves, it would otherwise be the one request the depth is reported from.
     """
     global _forwarding_observed
+    if _is_internal_peer(peer):
+        return
     if not _forwarding_observed:
         _forwarding_observed = True
         logger.info(
