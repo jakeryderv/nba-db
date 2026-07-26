@@ -1,7 +1,20 @@
 # public-api-surface Specification
 
 ## Purpose
-TBD - created by archiving change harden-public-api-surface. Update Purpose after archive.
+
+The API is public, anonymous, and unauthenticated, served by a single replica in
+front of one database. There is no account to rate-limit against and no tier to
+degrade, so every protection has to derive from the request itself.
+
+That makes two properties load-bearing. Identity must come from something the
+caller cannot choose, because a limiter keyed on attacker-supplied input imposes
+no limit at all. And limiter state must be bounded, because anything a caller can
+vary becomes a way to grow memory on the one process serving everyone.
+
+The surface is read-only by design, so these requirements are about availability
+rather than integrity: the failure this capability exists to prevent is one
+client, deliberately or accidentally, consuming the capacity of all of them.
+
 ## Requirements
 ### Requirement: Rate limiting keys on an identity the client cannot choose
 

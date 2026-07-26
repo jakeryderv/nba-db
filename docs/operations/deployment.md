@@ -120,6 +120,51 @@ Railway to serve that exact Git SHA, then reruns the complete live contract. Fai
 failed Railway deployment, and a broken live contract create or update a `production-alert` GitHub
 issue. A later successful observation closes the incident automatically.
 
+### Continuous watch
+
+The `Production Watch` workflow observes production from outside the jobs it reports on, on two
+schedules:
+
+| Mode | Schedule | Asserts |
+| --- | --- | --- |
+| Liveness | every 10 minutes | `/ready` returns a ready status, read past any cache |
+| Freshness | 14:00 UTC daily | newest backup is under 36h old and a drill proved one within 40 days |
+
+The liveness probe retries three times within the run before alerting, so a transient blip does not
+open an issue while a real outage still surfaces inside one interval. It sends `Cache-Control:
+no-cache` deliberately: a cached response outlives the instance that produced it, so answering the
+check from cache would assert only that production *was* healthy when the response was stored.
+
+36 hours tolerates exactly one missed daily backup and alarms on two. 40 days tolerates one missed
+monthly drill. Each concern owns a distinct alert title, and the reconciler matches titles exactly,
+so no operation's recovery can close another's alert.
+
+Run either mode on demand from the Actions tab. `api_url_override` and `max_age_hours` inputs exist
+to exercise the alert path deliberately.
+
+**These checks share a failure domain with what they watch.** They run on GitHub Actions, the same
+platform as the backup and release workflows. This closes the dominant gap — the backup job going
+silent while every other signal reads healthy — but it is not independent monitoring. If Actions is
+unavailable, or this repository's schedules are disabled, the watch stops alongside the jobs it
+watches and the silence returns. Genuine independence needs an off-platform monitor; a Cloudflare
+Health Check against `/ready` is the natural upgrade for the liveness half. Do not read a quiet
+`production-alert` label as proof that anything ran.
+
+### Backup durability
+
+The daily backup, the monthly restore drill, and the freshness check form one loop:
+
+- The drill restores into isolated PostgreSQL 18, runs the same `init_db.py` boot path production
+  runs, compares the restored `seasons.manifest_sha256` against the digest stamped on the backup
+  object, and then evaluates the readiness contract **as the app's read-only role**. A pass means
+  the restored database would be given traffic, not merely that rows loaded.
+- A passing drill records the proved object key in `database-backups/<season>/last-proven.json`.
+- Retention spares that key. Without it, the only copy ever demonstrated to work could expire on
+  roughly the cadence of the check that demonstrated it — 30-day retention against a monthly drill.
+  Keeping the newest seven copies does not help, because that preserves recency, and recency is not
+  evidence.
+- Pruning fails closed on an unreadable pointer: deleting backups is the irreversible direction.
+
 The public API applies a process-local sliding-window limit per client. Ordinary API reads default
 to 600 requests per minute; the aggregate-heavy shot chart, shot profile, and CSV routes default to
 120. Large responses use gzip when the client advertises support. Override the limits with the

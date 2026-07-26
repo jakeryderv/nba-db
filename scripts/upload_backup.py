@@ -23,6 +23,9 @@ from scripts.archive_dataset import (  # noqa: E402
     S3Client,
     _s3_client,
     _sha256,
+    backup_prefix,
+    list_prefix_objects,
+    read_proven_pointer,
 )
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -97,28 +100,31 @@ def prune_backups(
         raise ArtifactArchiveError("Minimum backup copies must be positive")
     current = now or datetime.now(UTC)
     cutoff = current - timedelta(days=retention_days)
-    prefix = f"database-backups/{season}/"
-    objects: list[dict[str, Any]] = []
-    continuation_token: str | None = None
-    while True:
-        arguments: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
-        if continuation_token:
-            arguments["ContinuationToken"] = continuation_token
-        response = client.list_objects_v2(**arguments)
-        objects.extend(response.get("Contents", []))
-        if not response.get("IsTruncated"):
-            break
-        continuation_token = response.get("NextContinuationToken")
-        if not continuation_token:
-            raise ArtifactArchiveError("Backup listing was truncated without a continuation token")
+    prefix = backup_prefix(season)
+    objects = list_prefix_objects(client, bucket, prefix)
 
-    candidates = sorted(objects, key=lambda item: item["LastModified"], reverse=True)
+    # Read the pointer before deciding anything. A corrupt pointer raises out of
+    # here, so pruning stops rather than proceeding without the protection it
+    # encodes -- deleting backups is the irreversible direction.
+    pointer = read_proven_pointer(client, bucket, prefix)
+    protected = str(pointer["key"]) if pointer else ""
+
+    # Only .dump objects are backups. Without this filter the pruner deletes the
+    # proven-copy pointer itself, which lives under the same prefix.
+    backups = [item for item in objects if str(item.get("Key", "")).endswith(".dump")]
+    candidates = sorted(backups, key=lambda item: item["LastModified"], reverse=True)
     deleted: list[str] = []
     for item in candidates[minimum_copies:]:
         modified = item.get("LastModified")
         key = str(item.get("Key", ""))
         if not isinstance(modified, datetime) or not key.startswith(prefix):
             raise ArtifactArchiveError("Object storage returned invalid backup metadata")
+        if key == protected:
+            # Retention is measured in days and the drill runs monthly, so the
+            # only artifact ever demonstrated to work can expire on roughly the
+            # cadence of the check that demonstrated it. Keeping the newest N
+            # does not help: that preserves recency, and recency is not evidence.
+            continue
         if modified < cutoff:
             client.delete_object(Bucket=bucket, Key=key)
             deleted.append(key)

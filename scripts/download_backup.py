@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,6 +20,8 @@ from scripts.archive_dataset import (  # noqa: E402
     S3Client,
     _s3_client,
     _sha256,
+    backup_prefix,
+    list_prefix_objects,
 )
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -33,20 +35,8 @@ def latest_backup(
         raise ArtifactArchiveError("Output must be a new .dump file")
     if not output_file.parent.is_dir():
         raise ArtifactArchiveError("Backup output directory must already exist")
-    prefix = f"database-backups/{season}/"
-    objects: list[dict[str, Any]] = []
-    token: str | None = None
-    while True:
-        arguments: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
-        if token:
-            arguments["ContinuationToken"] = token
-        response = client.list_objects_v2(**arguments)
-        objects.extend(response.get("Contents", []))
-        if not response.get("IsTruncated"):
-            break
-        token = response.get("NextContinuationToken")
-        if not token:
-            raise ArtifactArchiveError("Backup listing was truncated without a continuation token")
+    prefix = backup_prefix(season)
+    objects = list_prefix_objects(client, bucket, prefix)
     backups = [
         item
         for item in objects
@@ -70,6 +60,7 @@ def latest_backup(
         raise ArtifactArchiveError("Downloaded backup checksum did not verify")
     return {
         "location": f"s3://{bucket}/{key}",
+        "key": key,
         "backup_file": str(output_file),
         "backup_bytes": output_file.stat().st_size,
         "backup_sha256": actual_checksum,
@@ -92,6 +83,12 @@ def main() -> None:
         )
     except ArtifactArchiveError as exc:
         parser.exit(2, f"ERROR: {exc}\n")
+    # The receipt carries the object key and manifest digest downstream. The
+    # drill compares that digest against the restored data, and recording a
+    # proven copy needs the key -- both would otherwise have to be re-derived
+    # by a second listing that could pick a different object.
+    receipt_path = args.output_file.with_suffix(args.output_file.suffix + ".json")
+    receipt_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(f"Downloaded verified backup: {result['location']} ({result['backup_sha256']})")
 
 

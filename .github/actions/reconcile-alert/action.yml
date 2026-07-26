@@ -1,0 +1,69 @@
+name: Reconcile production alert
+description: >-
+  Open, update, or close the production-alert issue for a single named concern,
+  so each scheduled operation owns its own alert state.
+
+inputs:
+  title:
+    description: >-
+      Exact issue title identifying the concern. Matched literally, so it must be
+      stable across runs and distinct from every other concern's title.
+    required: true
+  passed:
+    description: Whether the concern passed on this run ("true" or "false").
+    required: true
+  run-url:
+    description: Link an operator follows to investigate.
+    required: false
+    default: ""
+  token:
+    description: Token with issues:write on this repository.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Reconcile
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        ALERT_TITLE: ${{ inputs.title }}
+        ALERT_PASSED: ${{ inputs.passed }}
+        ALERT_RUN_URL: ${{ inputs.run-url }}
+        DEFAULT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        run_url="${ALERT_RUN_URL:-}"
+        if [ -z "$run_url" ]; then
+          run_url="$DEFAULT_RUN_URL"
+        fi
+
+        gh label create production-alert --color D73A4A \
+          --description "Automated production operations require attention" --force
+
+        # Match the title exactly rather than through `--search "... in:title"`.
+        # GitHub search ANDs word tokens, so a title that is a superset of
+        # another's words matches it: searching "Production backup failed"
+        # also hits "Production backup freshness check failed". That would let
+        # one concern's recovery close a different concern's open alert, which
+        # is the failure this action exists to prevent.
+        issue="$(gh issue list --state open --label production-alert --limit 100 \
+          --json number,title \
+          --jq 'map(select(.title == env.ALERT_TITLE)) | .[0].number // empty')"
+
+        if [ "$ALERT_PASSED" = "true" ]; then
+          if [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Resolved by successful run $run_url"
+            echo "Closed #$issue: $ALERT_TITLE"
+          else
+            echo "Passed, no open alert: $ALERT_TITLE"
+          fi
+        elif [ -n "$issue" ]; then
+          gh issue comment "$issue" --body "Failed again: $run_url"
+          echo "Updated #$issue: $ALERT_TITLE"
+        else
+          gh issue create --title "$ALERT_TITLE" --label production-alert \
+            --body "Investigate the run: $run_url"
+          echo "Opened alert: $ALERT_TITLE"
+        fi

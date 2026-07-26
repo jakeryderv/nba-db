@@ -5,6 +5,9 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 
 
+RECONCILE_ACTION = ROOT / ".github/actions/reconcile-alert/action.yml"
+
+
 def test_maintenance_workflow_schedules_backups_retention_and_restore_drills() -> None:
     workflow = (ROOT / ".github/workflows/maintenance.yml").read_text()
 
@@ -14,7 +17,9 @@ def test_maintenance_workflow_schedules_backups_retention_and_restore_drills() -
     assert "--retention-days 30" in workflow
     assert "--minimum-copies 7" in workflow
     assert "restore-backup" in workflow
-    assert "production-alert" in workflow
+    # Alerting moved into the shared action; the label lives there now.
+    assert "./.github/actions/reconcile-alert" in workflow
+    assert "production-alert" in RECONCILE_ACTION.read_text()
 
 
 def test_release_observer_requires_ci_revision_and_live_contract() -> None:
@@ -41,9 +46,30 @@ def test_maintenance_alerts_are_keyed_per_operation() -> None:
     assert "Production restore drill failed" in workflow
     # Reconciliation is driven by which operation ran and how it ended, not by
     # whether the job as a whole succeeded.
-    assert "BACKUP_OUTCOME: ${{ steps.backup.outcome }}" in workflow
-    assert "RESTORE_OUTCOME: ${{ steps.restore.outcome }}" in workflow
-    assert "DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}" in workflow
+    assert "steps.backup.outcome == 'success'" in workflow
+    assert "steps.restore.outcome == 'success'" in workflow
+    assert "steps.download.outcome == 'success'" in workflow
+
+
+def test_alert_titles_are_matched_exactly_not_searched() -> None:
+    """GitHub search ANDs word tokens, so a superset title matches a subset's query.
+
+    "Production backup freshness check failed" contains every word of
+    "Production backup failed", so a search-based lookup would let the backup
+    job's recovery close the freshness alert. Every reconciler must compare
+    titles literally.
+    """
+    reconcilers = [
+        RECONCILE_ACTION,
+        ROOT / ".github/workflows/release-observer.yml",
+    ]
+    for path in reconcilers:
+        text = path.read_text()
+        # Comments name the rejected approach, so judge the executable lines only.
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        assert "in:title" not in code, f"{path} still resolves alerts by search"
+        assert "--search" not in code, f"{path} still resolves alerts by search"
+        assert "select(.title == env.ALERT_TITLE)" in code
 
 
 def test_alerting_steps_can_reach_the_repository_without_a_checkout() -> None:
@@ -53,10 +79,56 @@ def test_alerting_steps_can_reach_the_repository_without_a_checkout() -> None:
     without repo context on exactly the failures they exist to report.
     """
     observer = (ROOT / ".github/workflows/release-observer.yml").read_text()
-    maintenance = (ROOT / ".github/workflows/maintenance.yml").read_text()
 
     assert observer.count("GH_REPO: ${{ github.repository }}") >= 2
-    assert "GH_REPO: ${{ github.repository }}" in maintenance
+    # Maintenance delegates to the shared action, which sets it for every caller.
+    assert "GH_REPO: ${{ github.repository }}" in RECONCILE_ACTION.read_text()
+
+
+def test_release_observer_does_not_depend_on_the_repo_local_action() -> None:
+    """Its checkout is conditional, so a repo-local action would silence it.
+
+    The observer's alert must file when CI failed -- which is exactly when its
+    checkout is skipped. Routing it through .github/actions/ would reintroduce
+    the bug the GH_REPO fix closed, so its duplication is deliberate.
+    """
+    observer = (ROOT / ".github/workflows/release-observer.yml").read_text()
+
+    assert "./.github/actions/reconcile-alert" not in observer
+
+
+def test_production_watch_covers_liveness_and_freshness_separately() -> None:
+    workflow = (ROOT / ".github/workflows/production-watch.yml").read_text()
+
+    assert 'cron: "*/10 * * * *"' in workflow
+    assert 'cron: "0 14 * * *"' in workflow
+    # Distinct titles, so neither closes the other's alert nor maintenance's.
+    assert "Production liveness check failed" in workflow
+    assert "Production backup freshness check failed" in workflow
+    assert "check_backup_freshness.py" in workflow
+
+
+def test_liveness_probe_cannot_be_satisfied_by_a_cache() -> None:
+    """A cached response outlives the instance that produced it.
+
+    Answering the probe from cache asserts that production was healthy when the
+    response was stored, which is the one claim the check exists to avoid.
+    """
+    workflow = (ROOT / ".github/workflows/production-watch.yml").read_text()
+
+    assert "Cache-Control: no-cache" in workflow
+    assert "Pragma: no-cache" in workflow
+    assert "/ready" in workflow
+
+
+def test_restore_drill_compares_the_manifest_and_records_the_proven_copy() -> None:
+    workflow = (ROOT / ".github/workflows/maintenance.yml").read_text()
+
+    assert "--manifest-sha256=${{ steps.download.outputs.manifest }}" in workflow
+    assert "record_proven_backup.py" in workflow
+    # A drill that passes but fails to record its proven copy leaves retention
+    # unprotected, so it must not report success.
+    assert "steps.record.outcome == 'success'" in workflow
 
 
 def test_a_cancelled_ci_run_is_not_a_broken_release() -> None:
