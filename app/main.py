@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from psycopg_pool import PoolTimeout
+from psycopg_pool import PoolTimeout, TooManyRequests
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.db import close_pool, get_cursor, get_pool
@@ -107,8 +107,16 @@ app.add_middleware(RequestPolicyMiddleware)
 
 
 @app.exception_handler(PoolTimeout)
+@app.exception_handler(TooManyRequests)
 def handle_pool_timeout(request: Request, exc: Exception) -> JSONResponse:
-    """Report pool exhaustion as retryable rather than as an opaque failure."""
+    """Report pool exhaustion as retryable rather than as an opaque failure.
+
+    Both exhaustion modes must be handled. PoolTimeout is raised when a caller
+    waits out the pool timeout; TooManyRequests when the wait queue itself is
+    full. They are siblings under OperationalError, not parent and child, so
+    registering only PoolTimeout leaves the queue-full case falling through to
+    the catch-all -- a 500 with a stack trace, for ordinary overload.
+    """
     logger.warning(
         "Connection pool exhausted request_id=%s path=%s",
         getattr(request.state, "request_id", ""),
