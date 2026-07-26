@@ -15,7 +15,7 @@
 
 - [x] 3.1 `make check`, `make test`
 - [x] 3.2 `make dagger-check`
-- [ ] 3.3 Merge and archive
+- [x] 3.3 Merged as `b6853f5`; archived here
 
 ## 4. Deliberately deferred
 
