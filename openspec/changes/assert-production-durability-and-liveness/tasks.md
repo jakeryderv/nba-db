@@ -22,26 +22,26 @@
 
 ## 4. Restore drill proves servability
 
-- [ ] 4.1 Add a failing test asserting the drill fails when the restored `seasons.manifest_sha256` disagrees with the backup object's recorded manifest digest, and when that metadata is absent.
-- [ ] 4.2 Thread the backup object's manifest digest from `scripts/download_backup.py` (already read, currently unused downstream) into the drill and compare it.
-- [ ] 4.3 Run `scripts/init_db.py` against the restored database inside the drill, proving migrations apply and `nba_readonly` plus grants are recreated.
-- [ ] 4.4 Evaluate the application's readiness check against the restored database, asserting the same conditions the deployment healthcheck does from the same code rather than a reimplementation.
-- [ ] 4.5 Connect as `nba_readonly` and run a representative read, proving the least-privilege path and not only the superuser path.
-- [ ] 4.6 Update `.dagger/src/nba_db_ci/main.py` `restore-backup` for the added steps and keep its reported output naming what was proved.
+- [x] 4.1 Add a failing test asserting the drill fails when the restored `seasons.manifest_sha256` disagrees with the backup object's recorded manifest digest, and when that metadata is absent.
+- [x] 4.2 Thread the backup object's manifest digest from `scripts/download_backup.py` (already read, currently unused downstream) into the drill and compare it.
+- [x] 4.3 Run `scripts/init_db.py` against the restored database inside the drill, proving migrations apply and `nba_readonly` plus grants are recreated.
+- [x] 4.4 Evaluate the application's readiness check against the restored database, asserting the same conditions the deployment healthcheck does from the same code rather than a reimplementation.
+- [x] 4.5 Connect as `nba_readonly` and run a representative read, proving the least-privilege path and not only the superuser path.
+- [x] 4.6 Update `.dagger/src/nba_db_ci/main.py` `restore-backup` for the added steps and keep its reported output naming what was proved.
 
 ## 5. Retention preserves the proven copy
 
-- [ ] 5.1 Have a successful drill write `database-backups/<season>/last-proven.json` naming the proved key and the time it was proved.
-- [ ] 5.2 Add a failing test asserting `prune_backups` retains the pointed-at key even when it is older than the retention window, and still prunes expired unproven copies.
-- [ ] 5.3 Implement the guard in `scripts/upload_backup.py`.
-- [ ] 5.4 Add a failing test asserting pruning aborts on an unreadable or malformed pointer, then implement that fail-closed behavior.
-- [ ] 5.5 Confirm the pointer object cannot itself be pruned — it does not match the `.dump` suffix filter, but assert it rather than assuming.
+- [x] 5.1 Have a successful drill write `database-backups/<season>/last-proven.json` naming the proved key and the time it was proved.
+- [x] 5.2 Add a failing test asserting `prune_backups` retains the pointed-at key even when it is older than the retention window, and still prunes expired unproven copies.
+- [x] 5.3 Implement the guard in `scripts/upload_backup.py`.
+- [x] 5.4 Add a failing test asserting pruning aborts on an unreadable or malformed pointer, then implement that fail-closed behavior.
+- [x] 5.5 Confirm the pointer object cannot itself be pruned — it does not match the `.dump` suffix filter, but assert it rather than assuming.
 
 ## 6. Documentation
 
-- [ ] 6.1 Document the watch workflow, both schedules, and the max-age values in `docs/operations/deployment.md` under production monitoring.
-- [ ] 6.2 State the shared-failure-domain limitation plainly in the same section: these checks run on the same platform as the jobs they watch, so platform-wide silence is not covered.
-- [ ] 6.3 Replace the `TBD - created by archiving change harden-public-api-surface` placeholder in `openspec/specs/public-api-surface/spec.md` with a real Purpose.
+- [x] 6.1 Document the watch workflow, both schedules, and the max-age values in `docs/operations/deployment.md` under production monitoring.
+- [x] 6.2 State the shared-failure-domain limitation plainly in the same section: these checks run on the same platform as the jobs they watch, so platform-wide silence is not covered.
+- [x] 6.3 Replace the `TBD - created by archiving change harden-public-api-surface` placeholder in `openspec/specs/public-api-surface/spec.md` with a real Purpose.
 
 ## 7. Verification
 

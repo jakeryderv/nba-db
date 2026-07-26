@@ -52,6 +52,7 @@ from app.models import (
     TeamStanding,
     UsageEvent,
 )
+from app.readiness import evaluate_readiness
 from app.shot_filters import HomeAway, ShotType, shot_query_parts
 from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
 
@@ -207,38 +208,10 @@ def readiness_check() -> dict:
     """Confirm that the verified default dataset is complete and queryable."""
     try:
         with get_cursor() as cur:
-            cur.execute(
-                """
-                SELECT s.id AS season, s.verification_status,
-                       s.games_count, s.players_count, s.shot_attempts_count,
-                       (SELECT COUNT(*) FROM games WHERE season = s.id) AS live_games,
-                       (SELECT COUNT(DISTINCT player_id)
-                        FROM player_game_stats WHERE season = s.id) AS live_players,
-                       (SELECT COUNT(*) FROM shot_attempts WHERE season = s.id) AS live_shots
-                FROM seasons s
-                WHERE s.id = %s
-                """,
-                (DEFAULT_SEASON,),
-            )
-            row = cur.fetchone()
-        if (
-            not row
-            or row["verification_status"] != "passed"
-            or row["games_count"] != row["live_games"]
-            or row["players_count"] != row["live_players"]
-            or row["shot_attempts_count"] != row["live_shots"]
-        ):
+            payload = evaluate_readiness(cur, DEFAULT_SEASON)
+        if payload is None:
             raise HTTPException(status_code=503, detail="Verified dataset is not ready")
-        return {
-            "status": "ready",
-            "season": row["season"],
-            "verification_status": row["verification_status"],
-            "counts": {
-                "games": row["live_games"],
-                "players": row["live_players"],
-                "shot_attempts": row["live_shots"],
-            },
-        }
+        return payload
     except HTTPException:
         raise
     except Exception as exc:

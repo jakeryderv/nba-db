@@ -144,12 +144,20 @@ jobs:
         id: download
         if: steps.mode.outputs.restore == 'true'
         run: |
+          set -euo pipefail
           install -d -m 700 .maintenance
           uv run --locked --no-dev --extra ops python scripts/download_backup.py \
             --season "$SEASON" \
             --output-file .maintenance/latest.dump
+          # The receipt carries the object key and the manifest digest recorded
+          # on the object. The drill compares that digest against the restored
+          # data; recording a proven copy needs the key. Re-deriving either with
+          # a second listing could pick a different object than the one restored.
+          receipt=.maintenance/latest.dump.json
+          echo "manifest=$(jq -er '.manifest_sha256' "$receipt")" >> "$GITHUB_OUTPUT"
+          echo "key=$(jq -er '.key' "$receipt")" >> "$GITHUB_OUTPUT"
 
-      - name: Restore and verify in isolated PostgreSQL 18
+      - name: Restore and prove servable in isolated PostgreSQL 18
         id: restore
         if: steps.mode.outputs.restore == 'true'
         uses: dagger/dagger-for-github@v8.4.0
@@ -160,7 +168,17 @@ jobs:
             restore-backup
             --backup=.maintenance/latest.dump
             --season=2025-26
+            --manifest-sha256=${{ steps.download.outputs.manifest }}
             --source=.
+
+      - name: Record the proven backup
+        id: record
+        if: steps.mode.outputs.restore == 'true' && steps.restore.outcome == 'success'
+        run: |
+          set -euo pipefail
+          uv run --locked --no-dev --extra ops python scripts/record_proven_backup.py \
+            --season "$SEASON" \
+            --key "${{ steps.download.outputs.key }}"
 
       # Alert state is keyed to the operation, not to the workflow. The two
       # schedules run different operations, so a single shared issue title let
@@ -185,5 +203,5 @@ jobs:
         uses: ./.github/actions/reconcile-alert
         with:
           title: Production restore drill failed
-          passed: ${{ steps.download.outcome == 'success' && steps.restore.outcome == 'success' }}
+          passed: ${{ steps.download.outcome == 'success' && steps.restore.outcome == 'success' && steps.record.outcome == 'success' }}
           token: ${{ github.token }}

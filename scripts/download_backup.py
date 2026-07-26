@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from datetime import datetime
@@ -59,6 +60,7 @@ def latest_backup(
         raise ArtifactArchiveError("Downloaded backup checksum did not verify")
     return {
         "location": f"s3://{bucket}/{key}",
+        "key": key,
         "backup_file": str(output_file),
         "backup_bytes": output_file.stat().st_size,
         "backup_sha256": actual_checksum,
@@ -81,6 +83,12 @@ def main() -> None:
         )
     except ArtifactArchiveError as exc:
         parser.exit(2, f"ERROR: {exc}\n")
+    # The receipt carries the object key and manifest digest downstream. The
+    # drill compares that digest against the restored data, and recording a
+    # proven copy needs the key -- both would otherwise have to be re-derived
+    # by a second listing that could pick a different object.
+    receipt_path = args.output_file.with_suffix(args.output_file.suffix + ".json")
+    receipt_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(f"Downloaded verified backup: {result['location']} ({result['backup_sha256']})")
 
 

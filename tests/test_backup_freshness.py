@@ -146,6 +146,135 @@ def test_malformed_proven_pointer_fails_closed() -> None:
         )
 
 
+class FakeRetentionStore:
+    """Backup store with a proven-copy pointer, for retention decisions."""
+
+    def __init__(self, ages_days: list[float], pointer: object = None) -> None:
+        self.objects = [
+            {
+                "Key": f"{PREFIX}backup-{index}.dump",
+                "LastModified": NOW - timedelta(days=age),
+            }
+            for index, age in enumerate(ages_days)
+        ]
+        self.pointer = pointer
+        self.deleted: list[str] = []
+
+    def list_objects_v2(self, **_kwargs) -> dict:
+        return {"Contents": self.objects, "IsTruncated": False}
+
+    def delete_object(self, Bucket: str, Key: str) -> dict:
+        self.deleted.append(Key)
+        return {}
+
+    def get_object(self, Bucket: str, Key: str) -> dict:
+        if self.pointer is None:
+            raise LookupError("NoSuchKey")
+        body = (
+            self.pointer if isinstance(self.pointer, bytes) else json.dumps(self.pointer).encode()
+        )
+
+        class _Body:
+            @staticmethod
+            def read() -> bytes:
+                return body
+
+        return {"Body": _Body()}
+
+
+def test_retention_preserves_the_last_proven_copy() -> None:
+    from scripts.upload_backup import prune_backups
+
+    # Ten daily backups; the only drill-proven copy is the oldest, well past the
+    # retention window. Keeping the newest N does not save it -- recency is not
+    # evidence.
+    store = FakeRetentionStore(
+        [float(day) for day in range(10)] + [45.0],
+        pointer={"key": f"{PREFIX}backup-10.dump", "proven_at": NOW.isoformat()},
+    )
+    deleted = prune_backups(
+        client=store,
+        bucket="bucket",
+        season=SEASON,
+        retention_days=30,
+        minimum_copies=7,
+        now=NOW,
+    )
+    assert f"{PREFIX}backup-10.dump" not in deleted
+    assert f"{PREFIX}backup-10.dump" not in store.deleted
+
+
+def test_retention_still_prunes_expired_unproven_copies() -> None:
+    from scripts.upload_backup import prune_backups
+
+    store = FakeRetentionStore(
+        [float(day) for day in range(7)] + [40.0, 50.0],
+        pointer={"key": f"{PREFIX}backup-0.dump", "proven_at": NOW.isoformat()},
+    )
+    deleted = prune_backups(
+        client=store,
+        bucket="bucket",
+        season=SEASON,
+        retention_days=30,
+        minimum_copies=7,
+        now=NOW,
+    )
+    assert f"{PREFIX}backup-7.dump" in deleted
+    assert f"{PREFIX}backup-8.dump" in deleted
+
+
+def test_retention_fails_closed_on_an_unreadable_pointer() -> None:
+    from scripts.upload_backup import prune_backups
+
+    store = FakeRetentionStore([float(day) for day in range(10)] + [45.0], pointer=b"{bad json")
+    with pytest.raises(ArtifactArchiveError, match="unreadable|malformed"):
+        prune_backups(
+            client=store,
+            bucket="bucket",
+            season=SEASON,
+            retention_days=30,
+            minimum_copies=7,
+            now=NOW,
+        )
+    # Deleting is the irreversible direction, so nothing may be removed.
+    assert store.deleted == []
+
+
+def test_retention_proceeds_when_no_copy_has_been_proven_yet() -> None:
+    """An absent pointer is a first run, not a corrupt one."""
+    from scripts.upload_backup import prune_backups
+
+    store = FakeRetentionStore([float(day) for day in range(7)] + [45.0], pointer=None)
+    deleted = prune_backups(
+        client=store,
+        bucket="bucket",
+        season=SEASON,
+        retention_days=30,
+        minimum_copies=7,
+        now=NOW,
+    )
+    assert f"{PREFIX}backup-7.dump" in deleted
+
+
+def test_proven_pointer_is_not_itself_prunable() -> None:
+    """The pointer must survive retention; it is not a .dump."""
+    from scripts.upload_backup import prune_backups
+
+    store = FakeRetentionStore([float(day) for day in range(7)] + [45.0], pointer=None)
+    store.objects.append(
+        {"Key": f"{PREFIX}{PROVEN_POINTER_NAME}", "LastModified": NOW - timedelta(days=90)}
+    )
+    prune_backups(
+        client=store,
+        bucket="bucket",
+        season=SEASON,
+        retention_days=30,
+        minimum_copies=7,
+        now=NOW,
+    )
+    assert f"{PREFIX}{PROVEN_POINTER_NAME}" not in store.deleted
+
+
 def test_freshness_check_does_not_depend_on_the_backup_job() -> None:
     """The check must not be satisfiable by the upload path having run.
 

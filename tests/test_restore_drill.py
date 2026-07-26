@@ -6,8 +6,38 @@ import pytest
 
 from db.config import get_db_config
 from etl.season_lifecycle import create_backup
-from scripts.restore_drill import RestoreDrillError, recovery_config, run_restore_drill
+from scripts.restore_drill import (
+    RestoreDrillError,
+    assert_manifest_matches,
+    recovery_config,
+    run_restore_drill,
+)
 from tests.conftest import SEED_SEASON
+
+DIGEST = "a" * 64
+OTHER_DIGEST = "b" * 64
+
+
+def test_backup_whose_manifest_disagrees_with_restored_data_fails() -> None:
+    with pytest.raises(RestoreDrillError, match="does not match"):
+        assert_manifest_matches(restored=DIGEST, expected=OTHER_DIGEST)
+
+
+def test_backup_missing_manifest_metadata_cannot_pass() -> None:
+    # Skipping the comparison would let the drill report success while proving
+    # only that the dump is self-consistent, not that it is production's data.
+    with pytest.raises(RestoreDrillError, match="carries no manifest digest"):
+        assert_manifest_matches(restored=DIGEST, expected=None)
+
+
+def test_restored_database_missing_manifest_digest_fails() -> None:
+    with pytest.raises(RestoreDrillError, match="records no manifest digest"):
+        assert_manifest_matches(restored=None, expected=DIGEST)
+
+
+def test_matching_manifest_digests_pass() -> None:
+    # The assertion is that this does not raise.
+    assert_manifest_matches(restored=DIGEST, expected=DIGEST)
 
 
 def test_recovery_config_requires_disposable_name_and_typed_confirmation() -> None:
@@ -76,13 +106,17 @@ def test_restore_omits_environment_specific_owners_and_acls(monkeypatch, tmp_pat
     monkeypatch.setattr(
         restore_drill,
         "verify_restored_database",
-        lambda *_args: {"games": 1, "players": 1, "shot_attempts": 1},
+        lambda *_args, **_kwargs: {"games": 1, "players": 1, "shot_attempts": 1},
     )
 
+    # prove_servable is off because this test stubs the database out entirely;
+    # the servability path is covered against a real restore below.
     restore_drill.run_restore_drill(
         backup,
         {"dbname": "nba_test_recovery", "host": "database", "user": "nba_user"},
         "2025-26",
+        expected_manifest_sha256=DIGEST,
+        prove_servable=False,
         runner=runner,
     )
 
@@ -95,32 +129,92 @@ def test_restore_omits_environment_specific_owners_and_acls(monkeypatch, tmp_pat
     shutil.which("pg_dump") is None or shutil.which("pg_restore") is None,
     reason="PostgreSQL client tools are not installed",
 )
-def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path) -> None:
+def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path, monkeypatch) -> None:
+    import psycopg
+
     from app.db import get_cursor
 
     del client
     config = get_db_config()
     recovery = {**config, "dbname": "nba_db_test_recovery"}
     backup = tmp_path / "nba-db-test.dump"
+    # Roles are cluster-scoped, not per-database, so the drill's role setup would
+    # otherwise reset the password of a real nba_readonly on this machine.
+    drill_role = "nba_readonly_drill_test"
+    monkeypatch.setenv("READONLY_DB_USER", drill_role)
+    monkeypatch.setenv("READONLY_DB_PASSWORD", "drill-test-password")
     with get_cursor() as cur:
         cur.execute(
             """
             UPDATE seasons
-            SET verification_status = 'passed', shot_attempts_count = 295
+            SET verification_status = 'passed', shot_attempts_count = 295,
+                manifest_sha256 = %s
             WHERE id = %s
             """,
-            (SEED_SEASON,),
+            (DIGEST, SEED_SEASON),
         )
     try:
         create_backup(config, backup)
-        counts = run_restore_drill(backup, recovery, SEED_SEASON)
-        assert counts == {"games": 10, "players": 3, "shot_attempts": 295}
+        report = run_restore_drill(backup, recovery, SEED_SEASON, expected_manifest_sha256=DIGEST)
+        assert report["games"] == 10
+        assert report["players"] == 3
+        assert report["shot_attempts"] == 295
+        # The drill proved the restored database satisfies the same contract the
+        # deployment healthcheck asserts, evaluated as the app's read-only role.
+        assert report["readiness"]["status"] == "ready"
+        assert report["readiness"]["counts"]["shot_attempts"] == 295
     finally:
         with get_cursor() as cur:
             cur.execute(
                 """
                 UPDATE seasons
-                SET verification_status = 'untracked', shot_attempts_count = 0
+                SET verification_status = 'untracked', shot_attempts_count = 0,
+                    manifest_sha256 = NULL
+                WHERE id = %s
+                """,
+                (SEED_SEASON,),
+            )
+        with psycopg.connect(**{**config, "dbname": "postgres"}, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP ROLE IF EXISTS "{drill_role}"')
+
+
+@pytest.mark.skipif(
+    shutil.which("pg_dump") is None or shutil.which("pg_restore") is None,
+    reason="PostgreSQL client tools are not installed",
+)
+def test_restore_drill_rejects_a_backup_from_a_different_dataset(
+    client, tmp_path, monkeypatch
+) -> None:
+    """A dump whose manifest disagrees with production must not pass the drill."""
+    from app.db import get_cursor
+
+    del client
+    config = get_db_config()
+    recovery = {**config, "dbname": "nba_db_test_recovery"}
+    backup = tmp_path / "nba-db-mismatch.dump"
+    monkeypatch.setenv("READONLY_DB_PASSWORD", "drill-test-password")
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE seasons
+            SET verification_status = 'passed', shot_attempts_count = 295,
+                manifest_sha256 = %s
+            WHERE id = %s
+            """,
+            (DIGEST, SEED_SEASON),
+        )
+    try:
+        create_backup(config, backup)
+        with pytest.raises(RestoreDrillError, match="does not match"):
+            run_restore_drill(backup, recovery, SEED_SEASON, expected_manifest_sha256=OTHER_DIGEST)
+    finally:
+        with get_cursor() as cur:
+            cur.execute(
+                """
+                UPDATE seasons
+                SET verification_status = 'untracked', shot_attempts_count = 0,
+                    manifest_sha256 = NULL
                 WHERE id = %s
                 """,
                 (SEED_SEASON,),

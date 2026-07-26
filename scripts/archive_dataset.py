@@ -53,9 +53,49 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+PROVEN_POINTER_NAME = "last-proven.json"
+
+
 def backup_prefix(season: str) -> str:
     """Return the object-storage prefix holding a season's database backups."""
     return f"database-backups/{season}/"
+
+
+def read_proven_pointer(client: S3Client, bucket: str, prefix: str) -> dict[str, Any] | None:
+    """Return the drill's proven-copy pointer, or None when none has been written.
+
+    Absent and corrupt are deliberately different answers. An absent pointer is a
+    first run; a corrupt one is a fault, and callers that delete backups must
+    stop rather than proceed without the protection it encodes.
+    """
+    key = f"{prefix}{PROVEN_POINTER_NAME}"
+    try:
+        raw = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+    except Exception:  # noqa: BLE001 - any retrieval failure means "not written yet"
+        return None
+    try:
+        pointer = json.loads(raw)
+        proven_at = datetime.fromisoformat(str(pointer["proven_at"]))
+        proved_key = str(pointer["key"])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ArtifactArchiveError(
+            f"Proven-backup pointer is unreadable or malformed: {key} ({exc})"
+        ) from exc
+    if proven_at.tzinfo is None:
+        proven_at = proven_at.replace(tzinfo=UTC)
+    return {"key": proved_key, "proven_at": proven_at}
+
+
+def write_proven_pointer(
+    client: S3Client, bucket: str, prefix: str, *, key: str, proven_at: datetime
+) -> str:
+    """Record which backup a drill proved restorable, so retention can spare it."""
+    pointer_key = f"{prefix}{PROVEN_POINTER_NAME}"
+    body = json.dumps(
+        {"key": key, "proven_at": proven_at.isoformat()}, indent=2, sort_keys=True
+    ).encode()
+    client.put_object(Bucket=bucket, Key=pointer_key, Body=body)
+    return pointer_key
 
 
 def list_prefix_objects(client: S3Client, bucket: str, prefix: str) -> list[dict[str, Any]]:

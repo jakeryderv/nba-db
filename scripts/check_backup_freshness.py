@@ -26,42 +26,21 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from nba_config import DEFAULT_SEASON  # noqa: E402
 from scripts.archive_dataset import (  # noqa: E402
+    PROVEN_POINTER_NAME,
     ArtifactArchiveError,
     S3Client,
     _s3_client,
     backup_prefix,
     list_prefix_objects,
+    read_proven_pointer,
 )
 
-PROVEN_POINTER_NAME = "last-proven.json"
+__all__ = ["PROVEN_POINTER_NAME", "check_freshness"]
 
 # The backup runs daily, so 36 hours tolerates exactly one missed run and alarms
 # on two. The drill runs monthly, so 40 days tolerates one missed drill.
 DEFAULT_MAX_AGE_HOURS = 36
 DEFAULT_MAX_DRILL_AGE_DAYS = 40
-
-
-def _read_proven_pointer(client: S3Client, bucket: str, prefix: str) -> dict[str, Any]:
-    """Return the drill's proven-copy pointer, distinguishing absent from corrupt."""
-    key = f"{prefix}{PROVEN_POINTER_NAME}"
-    try:
-        response = client.get_object(Bucket=bucket, Key=key)
-        raw = response["Body"].read()
-    except Exception as exc:  # noqa: BLE001 - any retrieval failure means "no pointer"
-        raise ArtifactArchiveError(
-            f"No backup has ever been proven restorable: {key} is absent ({exc})"
-        ) from exc
-    try:
-        pointer = json.loads(raw)
-        proven_at = datetime.fromisoformat(str(pointer["proven_at"]))
-        proved_key = str(pointer["key"])
-    except (ValueError, TypeError, KeyError) as exc:
-        raise ArtifactArchiveError(
-            f"Proven-backup pointer is unreadable or malformed: {key} ({exc})"
-        ) from exc
-    if proven_at.tzinfo is None:
-        proven_at = proven_at.replace(tzinfo=UTC)
-    return {"key": proved_key, "proven_at": proven_at}
 
 
 def check_freshness(
@@ -100,7 +79,12 @@ def check_freshness(
             "The backup schedule has probably stopped running."
         )
 
-    pointer = _read_proven_pointer(client, bucket, prefix)
+    pointer = read_proven_pointer(client, bucket, prefix)
+    if pointer is None:
+        raise ArtifactArchiveError(
+            f"No backup for {season} has ever been proven restorable. "
+            "The restore drill has produced no proven copy."
+        )
     drill_age_days = (current - pointer["proven_at"]).total_seconds() / 86400
     if drill_age_days > max_drill_age_days:
         raise ArtifactArchiveError(

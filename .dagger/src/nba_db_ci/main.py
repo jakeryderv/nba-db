@@ -249,9 +249,16 @@ class NbaDbCi:
         self,
         backup: dagger.File,
         season: str,
+        manifest_sha256: str,
         source: Annotated[dagger.Directory, DefaultPath(".")],
     ) -> str:
-        """Restore and verify a real backup in an isolated PostgreSQL 18 service."""
+        """Restore a real backup in isolated PostgreSQL 18 and prove it can serve.
+
+        The drill runs the same boot path production runs, then evaluates the
+        readiness contract as the app's read-only role, so a pass means the
+        restored database would be given traffic rather than merely that rows
+        loaded. READONLY_DB_PASSWORD is what lets it recreate and use that role.
+        """
         return await (
             self._with_test_database(self._test_base(source))
             .with_file("/tmp/nba-db-production.dump", backup)
@@ -259,6 +266,7 @@ class NbaDbCi:
                 "RECOVERY_DATABASE_URL",
                 "postgresql://nba_user:nba_password@database:5432/nba_db_recovery",
             )
+            .with_env_variable("READONLY_DB_PASSWORD", "drill_readonly_password")
             .with_exec(
                 [
                     "uv",
@@ -269,6 +277,8 @@ class NbaDbCi:
                     season,
                     "--backup-file",
                     "/tmp/nba-db-production.dump",
+                    "--manifest-sha256",
+                    manifest_sha256,
                     "--confirm",
                     "RESTORE nba_db_recovery",
                 ]
