@@ -54,7 +54,15 @@ def upload_backup(
             "pg_restore is required to validate the backup archive before upload"
         ) from exc
     if listing.returncode != 0:
-        raise ArtifactArchiveError("Backup archive failed pg_restore inspection; refusing upload")
+        # Surface pg_restore's own reason. A version-mismatched client reports
+        # "unsupported version ... in file header", which is a broken validator
+        # rather than a broken backup; without the detail both look identical
+        # from the alert, and the investigation starts in the wrong place.
+        detail = (listing.stderr or "").strip().splitlines()
+        reason = detail[-1].strip() if detail else "pg_restore gave no reason"
+        raise ArtifactArchiveError(
+            f"Backup archive failed pg_restore inspection; refusing upload: {reason}"
+        )
     checksum = _sha256(backup)
     key = f"database-backups/{season}/{backup.name}"
     metadata = {"sha256": checksum, "manifest": manifest_sha256}
