@@ -4,18 +4,21 @@ import csv
 import io
 import logging
 import mimetypes
+import re
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Path as PathParam
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from psycopg_pool import PoolTimeout
 from starlette.middleware.gzip import GZipMiddleware
 
-from app.db import close_pool, get_cursor
-from app.middleware import RequestPolicyMiddleware
+from app.db import close_pool, get_cursor, get_pool
+from app.middleware import RequestPolicyMiddleware, apply_error_policy
 from app.models import (
     DatasetCounts,
     DatasetStatus,
@@ -54,9 +57,36 @@ from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
 
 logger = logging.getLogger("uvicorn.error")
 
+# Shared query-parameter types. Validation lives in one definition rather than
+# being repeated per endpoint, so a new route cannot omit it by oversight.
+# Lengths match the columns these values are compared against.
+SEASON_PATTERN = r"^\d{4}-\d{2}$"
+SeasonQuery = Annotated[str, Query(description="Season", pattern=SEASON_PATTERN, max_length=7)]
+GameIdQuery = Annotated[str | None, Query(description="Filter by game", max_length=20)]
+GameIdPath = Annotated[str, PathParam(description="Game ID", max_length=20)]
+SearchQuery = Annotated[str | None, Query(description="Search by name", max_length=100)]
+
+
+def _escape_like(term: str) -> str:
+    """Escape LIKE metacharacters so a search term matches literally.
+
+    Paired with an explicit ESCAPE clause at the call site: without this, a
+    search for '%' matches every row rather than the character itself.
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _filename_slug(value: str) -> str:
+    """Reduce a value to characters that are safe in a header parameter."""
+    slug = re.sub(r"[^A-Za-z0-9._-]", "-", value).strip("-")
+    return slug[:60] or "export"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Open the pool once at startup. Constructing it lazily from handlers, which
+    # run concurrently on a threadpool, lets two cold requests build two pools.
+    get_pool()
     yield
     close_pool()
 
@@ -66,9 +96,45 @@ app = FastAPI(
     description="API for querying NBA statistics.",
     version="2.0.0",
     lifespan=lifespan,
+    # The built-in docs page loads Swagger from a CDN and inlines its
+    # initializer, both of which this app's CSP blocks. /docs is served below
+    # from self-hosted assets instead.
+    docs_url=None,
+    redoc_url=None,
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.add_middleware(RequestPolicyMiddleware)
+
+
+@app.exception_handler(PoolTimeout)
+def handle_pool_timeout(request: Request, exc: Exception) -> JSONResponse:
+    """Report pool exhaustion as retryable rather than as an opaque failure."""
+    logger.warning(
+        "Connection pool exhausted request_id=%s path=%s",
+        getattr(request.state, "request_id", ""),
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Service busy; retry shortly"},
+        headers={"Retry-After": "5"},
+    )
+
+
+@app.exception_handler(Exception)
+def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """Return the correlation id the middleware logged, so a report is traceable."""
+    request_id = getattr(request.state, "request_id", "")
+    logger.exception("Unhandled error request_id=%s path=%s", request_id, request.url.path)
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "request_id": request_id},
+    )
+    # This handler runs outside the middleware stack; apply the policy here or
+    # the error response ships without the headers every other response carries.
+    apply_error_policy(request, response)
+    return response
+
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -88,6 +154,30 @@ def home():
     if not html_file.exists():
         raise HTTPException(status_code=404, detail="UI not found")
     return html_file.read_text()
+
+
+DOCS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/static/vendor/swagger-ui.css">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<title>NBA Database API - Docs</title>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="/static/vendor/swagger-ui-bundle.js"></script>
+<script src="/static/vendor/swagger-init.js"></script>
+</body>
+</html>
+"""
+
+
+@app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+def swagger_docs() -> str:
+    """Serve Swagger UI from self-hosted assets, with no inline script."""
+    return DOCS_HTML
 
 
 # === Health ===
@@ -160,7 +250,7 @@ def list_seasons() -> list[Season]:
 
 @app.get("/api/dataset-status", response_model=DatasetStatus, tags=["Seasons"])
 def get_dataset_status(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
 ) -> DatasetStatus:
     """Return public freshness, verification, and row-count metadata."""
     with get_cursor() as cur:
@@ -226,23 +316,28 @@ def list_teams() -> list[Team]:
         return [Team(**row) for row in cur.fetchall()]
 
 
+def _query_team(cur, team_id: int) -> Team:
+    """Fetch one team on a caller-supplied cursor.
+
+    Query functions take a cursor so an endpoint composing several of them
+    holds one pooled connection instead of checking one out per part.
+    """
+    cur.execute("SELECT * FROM teams WHERE id = %s", (team_id,))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return Team(**row)
+
+
 @app.get("/api/teams/{team_id}", response_model=Team, tags=["Teams"])
 def get_team(team_id: int) -> Team:
     with get_cursor() as cur:
-        cur.execute("SELECT * FROM teams WHERE id = %s", (team_id,))
-        row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Team not found")
-        return Team(**row)
+        return _query_team(cur, team_id)
 
 
-@app.get("/api/teams/{team_id}/stats", response_model=TeamSeasonSummary, tags=["Teams"])
-def get_team_season_stats(
-    team_id: int, season: str = Query(DEFAULT_SEASON, description="Season")
-) -> TeamSeasonSummary:
-    with get_cursor() as cur:
-        cur.execute(
-            """
+def _query_team_season_stats(cur, team_id: int, season: str) -> TeamSeasonSummary:
+    cur.execute(
+        """
             WITH team_games AS (
                 SELECT
                     g.id,
@@ -304,24 +399,30 @@ def get_team_season_stats(
             FROM ranked_games tg
             JOIN team_game_stats tgs ON tgs.game_id = tg.id AND tgs.team_id = %s
             JOIN team_game_stats otgs ON otgs.game_id = tg.id AND otgs.team_id <> %s
-            """,
-            (
-                team_id,
-                team_id,
-                team_id,
-                season,
-                team_id,
-                team_id,
-                team_id,
-                season,
-                team_id,
-                team_id,
-            ),
-        )
-        row = cur.fetchone()
-        if not row or row["games_played"] == 0:
-            raise HTTPException(status_code=404, detail="No team stats found")
-        return TeamSeasonSummary(**row)
+        """,
+        (
+            team_id,
+            team_id,
+            team_id,
+            season,
+            team_id,
+            team_id,
+            team_id,
+            season,
+            team_id,
+            team_id,
+        ),
+    )
+    row = cur.fetchone()
+    if not row or row["games_played"] == 0:
+        raise HTTPException(status_code=404, detail="No team stats found")
+    return TeamSeasonSummary(**row)
+
+
+@app.get("/api/teams/{team_id}/stats", response_model=TeamSeasonSummary, tags=["Teams"])
+def get_team_season_stats(team_id: int, season: SeasonQuery = DEFAULT_SEASON) -> TeamSeasonSummary:
+    with get_cursor() as cur:
+        return _query_team_season_stats(cur, team_id, season)
 
 
 @app.get(
@@ -331,7 +432,7 @@ def get_team_season_stats(
 )
 def get_team_players(
     team_id: int,
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     limit: int = Query(15, ge=1, le=50),
 ) -> TeamPlayerSummaryList:
     with get_cursor() as cur:
@@ -369,7 +470,7 @@ def get_team_players(
 
 @app.get("/api/players", response_model=PlayerList, tags=["Players"])
 def list_players(
-    search: str | None = Query(None, description="Search by name"),
+    search: SearchQuery = None,
     active: bool | None = Query(None, description="Filter by active status"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -379,8 +480,8 @@ def list_players(
         params: list = []
 
         if search:
-            conditions.append("full_name ILIKE %s")
-            params.append(f"%{search}%")
+            conditions.append("full_name ILIKE %s ESCAPE '\\'")
+            params.append(f"%{_escape_like(search)}%")
         if active is not None:
             conditions.append("is_active = %s")
             params.append(active)
@@ -409,11 +510,24 @@ def get_player(player_id: int) -> Player:
         return Player(**row)
 
 
-@app.get("/api/players/{player_id}/stats", response_model=list[PlayerSeasonAvg], tags=["Players"])
-def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
-    with get_cursor() as cur:
-        cur.execute(
-            """
+def _query_player_season_stats(
+    cur, player_id: int, season: str | None = None
+) -> list[PlayerSeasonAvg]:
+    """Season averages for one player, optionally narrowed to a single season.
+
+    Filtering in SQL matters for the comparison endpoints: fetching every season
+    and discarding all but one does work proportional to a career per request.
+    Returns rows without raising, because callers report absence differently.
+    """
+    season_filter = "AND pgs.season = %s" if season else ""
+    params: list = [player_id]
+    if season:
+        params.append(season)
+    params.append(player_id)
+    if season:
+        params.append(season)
+    cur.execute(
+        f"""
             WITH latest_team AS (
                 SELECT DISTINCT ON (pgs.season)
                     pgs.season,
@@ -422,7 +536,7 @@ def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
                 FROM player_game_stats pgs
                 JOIN games g ON g.id = pgs.game_id
                 JOIN teams t ON t.id = pgs.team_id
-                WHERE pgs.player_id = %s AND pgs.minutes IS NOT NULL
+                WHERE pgs.player_id = %s AND pgs.minutes IS NOT NULL {season_filter}
                 ORDER BY pgs.season, g.game_date DESC NULLS LAST, g.id DESC
             )
             SELECT
@@ -444,22 +558,28 @@ def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
             FROM player_game_stats pgs
             JOIN players p ON pgs.player_id = p.id
             JOIN latest_team lt ON lt.season = pgs.season
-            WHERE pgs.player_id = %s AND pgs.minutes IS NOT NULL
+            WHERE pgs.player_id = %s AND pgs.minutes IS NOT NULL {season_filter}
             GROUP BY pgs.player_id, p.full_name, pgs.season, lt.team_id, lt.team_abbr
             ORDER BY pgs.season DESC
-            """,
-            (player_id, player_id),
-        )
-        rows = cur.fetchall()
-        if not rows:
-            raise HTTPException(status_code=404, detail="No stats found for player")
-        return [PlayerSeasonAvg(**row) for row in rows]
+        """,
+        params,
+    )
+    return [PlayerSeasonAvg(**row) for row in cur.fetchall()]
+
+
+@app.get("/api/players/{player_id}/stats", response_model=list[PlayerSeasonAvg], tags=["Players"])
+def get_player_stats(player_id: int) -> list[PlayerSeasonAvg]:
+    with get_cursor() as cur:
+        rows = _query_player_season_stats(cur, player_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No stats found for player")
+    return rows
 
 
 @app.get("/api/players/{player_id}/games", response_model=PlayerGameLog, tags=["Players"])
 def get_player_games(
     player_id: int,
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> PlayerGameLog:
@@ -528,7 +648,7 @@ def _shot_subject(player_id: int | None, team_id: int | None) -> tuple[str, int,
 
 @app.get("/api/shot-chart/players", response_model=list[Player], tags=["Shot Charts"])
 def list_shot_chart_players(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
 ) -> list[Player]:
     """List only players who have shot attempts in the selected season."""
     with get_cursor() as cur:
@@ -549,7 +669,7 @@ def list_shot_chart_players(
 
 @app.get("/api/shot-chart/action-types", response_model=list[str], tags=["Shot Charts"])
 def list_shot_action_types(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
 ) -> list[str]:
     """List action types present in the verified season."""
     with get_cursor() as cur:
@@ -567,7 +687,7 @@ def list_shot_action_types(
 
 @app.get("/api/shot-chart/games", response_model=list[GameDetail], tags=["Shot Charts"])
 def list_shot_chart_games(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     player_id: int | None = Query(None, description="Player subject"),
     team_id: int | None = Query(None, description="Team subject"),
 ) -> list[GameDetail]:
@@ -603,10 +723,10 @@ def list_shot_chart_games(
 
 @app.get("/api/shot-chart.csv", tags=["Shot Charts"])
 def export_shot_chart_csv(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     player_id: int | None = Query(None),
     team_id: int | None = Query(None),
-    game_id: str | None = Query(None),
+    game_id: GameIdQuery = None,
     opponent_id: int | None = Query(None),
     period: int | None = Query(None, ge=1, le=20),
     made: bool | None = Query(None),
@@ -686,7 +806,7 @@ def export_shot_chart_csv(
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
-    filename = f"{season}-{subject_type}-{subject_id}-shots.csv"
+    filename = f"{_filename_slug(f'{season}-{subject_type}-{subject_id}')}-shots.csv"
     return Response(
         output.getvalue(),
         media_type="text/csv",
@@ -696,10 +816,10 @@ def export_shot_chart_csv(
 
 @app.get("/api/shot-chart", response_model=ShotChart, tags=["Shot Charts"])
 def get_shot_chart(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     player_id: int | None = Query(None, description="Player subject"),
     team_id: int | None = Query(None, description="Team subject"),
-    game_id: str | None = Query(None),
+    game_id: GameIdQuery = None,
     opponent_id: int | None = Query(None),
     period: int | None = Query(None, ge=1, le=20),
     made: bool | None = Query(None),
@@ -884,10 +1004,10 @@ def get_shot_chart(
 
 @app.get("/api/shot-profile", response_model=ShotProfile, tags=["Shot Charts"])
 def get_shot_profile(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     player_id: int | None = Query(None, description="Player subject"),
     team_id: int | None = Query(None, description="Team subject"),
-    game_id: str | None = Query(None),
+    game_id: GameIdQuery = None,
     opponent_id: int | None = Query(None),
     period: int | None = Query(None, ge=1, le=20),
     made: bool | None = Query(None),
@@ -1063,32 +1183,34 @@ def _comparison_pair(values: list[int], label: str) -> tuple[int, int]:
 @app.get("/api/comparisons/players", response_model=PlayerComparison, tags=["Comparisons"])
 def compare_players(
     player_ids: Annotated[list[int], Query(description="Exactly two distinct player IDs")],
-    season: Annotated[str, Query(description="Season")] = DEFAULT_SEASON,
+    season: SeasonQuery = DEFAULT_SEASON,
 ) -> PlayerComparison:
     first_id, second_id = _comparison_pair(player_ids, "player IDs")
     compared: list[PlayerSeasonAvg] = []
-    for player_id in (first_id, second_id):
-        season_stats = next(
-            (row for row in get_player_stats(player_id) if row.season == season), None
-        )
-        if season_stats is None:
-            raise HTTPException(status_code=404, detail="Player has no stats for this season")
-        compared.append(season_stats)
+    with get_cursor() as cur:
+        for player_id in (first_id, second_id):
+            rows = _query_player_season_stats(cur, player_id, season)
+            if not rows:
+                raise HTTPException(status_code=404, detail="Player has no stats for this season")
+            compared.append(rows[0])
     return PlayerComparison(season=season, data=compared)
 
 
 @app.get("/api/comparisons/teams", response_model=TeamComparison, tags=["Comparisons"])
 def compare_teams(
     team_ids: Annotated[list[int], Query(description="Exactly two distinct team IDs")],
-    season: Annotated[str, Query(description="Season")] = DEFAULT_SEASON,
+    season: SeasonQuery = DEFAULT_SEASON,
 ) -> TeamComparison:
     first_id, second_id = _comparison_pair(team_ids, "team IDs")
-    entries = [
-        TeamComparisonEntry(team=get_team(team_id), stats=get_team_season_stats(team_id, season))
-        for team_id in (first_id, second_id)
-    ]
 
     with get_cursor() as cur:
+        entries = [
+            TeamComparisonEntry(
+                team=_query_team(cur, team_id),
+                stats=_query_team_season_stats(cur, team_id, season),
+            )
+            for team_id in (first_id, second_id)
+        ]
         cur.execute(
             """
             SELECT
@@ -1136,7 +1258,7 @@ def compare_teams(
 
 @app.get("/api/games", response_model=GameList, tags=["Games"])
 def list_games(
-    season: str = Query(DEFAULT_SEASON, description="Filter by season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     team_id: int | None = Query(None, description="Filter by team"),
     sort: str = Query("desc", description="Sort by date: 'asc' or 'desc'"),
     limit: int = Query(50, ge=1, le=100),
@@ -1149,7 +1271,7 @@ def list_games(
         if season:
             conditions.append("g.season = %s")
             params.append(season)
-        if team_id:
+        if team_id is not None:
             conditions.append("(g.home_team_id = %s OR g.away_team_id = %s)")
             params.extend([team_id, team_id])
 
@@ -1177,7 +1299,7 @@ def list_games(
 
 
 @app.get("/api/games/{game_id}", response_model=GameDetail, tags=["Games"])
-def get_game(game_id: str) -> GameDetail:
+def get_game(game_id: GameIdPath) -> GameDetail:
     with get_cursor() as cur:
         cur.execute(
             """
@@ -1196,7 +1318,7 @@ def get_game(game_id: str) -> GameDetail:
 
 
 @app.get("/api/games/{game_id}/boxscore", response_model=GameBoxScore, tags=["Games"])
-def get_game_boxscore(game_id: str) -> GameBoxScore:
+def get_game_boxscore(game_id: GameIdPath) -> GameBoxScore:
     with get_cursor() as cur:
         cur.execute(
             """
@@ -1260,7 +1382,7 @@ def get_game_boxscore(game_id: str) -> GameBoxScore:
 
 @app.get("/api/team-game-stats", response_model=TeamGameStatsList, tags=["Box Scores"])
 def list_team_game_stats(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     team_id: int | None = Query(None, description="Filter by team"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -1269,7 +1391,7 @@ def list_team_game_stats(
         conditions = ["tgs.season = %s"]
         params: list = [season]
 
-        if team_id:
+        if team_id is not None:
             conditions.append("tgs.team_id = %s")
             params.append(team_id)
 
@@ -1296,10 +1418,10 @@ def list_team_game_stats(
 
 @app.get("/api/player-game-stats", response_model=PlayerGameStatsList, tags=["Box Scores"])
 def list_player_game_stats(
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     player_id: int | None = Query(None, description="Filter by player"),
     team_id: int | None = Query(None, description="Filter by team"),
-    game_id: str | None = Query(None, description="Filter by game"),
+    game_id: GameIdQuery = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> PlayerGameStatsList:
@@ -1307,13 +1429,13 @@ def list_player_game_stats(
         conditions = ["pgs.season = %s"]
         params: list = [season]
 
-        if player_id:
+        if player_id is not None:
             conditions.append("pgs.player_id = %s")
             params.append(player_id)
-        if team_id:
+        if team_id is not None:
             conditions.append("pgs.team_id = %s")
             params.append(team_id)
-        if game_id:
+        if game_id is not None:
             conditions.append("pgs.game_id = %s")
             params.append(game_id)
 
@@ -1348,7 +1470,7 @@ StatCategory = Literal["points", "rebounds", "assists", "steals", "blocks"]
 @app.get("/api/leaders/{stat}", response_model=LeaderList, tags=["Leaders"])
 def get_leaders(
     stat: StatCategory,
-    season: str = Query(DEFAULT_SEASON, description="Season"),
+    season: SeasonQuery = DEFAULT_SEASON,
     limit: int = Query(10, ge=1, le=50),
 ) -> LeaderList:
     stat_column = {
@@ -1424,7 +1546,7 @@ def get_leaders(
 
 
 @app.get("/api/standings", response_model=list[TeamStanding], tags=["Standings"])
-def get_standings(season: str = Query(DEFAULT_SEASON, description="Season")) -> list[TeamStanding]:
+def get_standings(season: SeasonQuery = DEFAULT_SEASON) -> list[TeamStanding]:
     with get_cursor() as cur:
         cur.execute(
             """

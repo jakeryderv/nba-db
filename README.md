@@ -313,10 +313,13 @@ make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 | `RECOVERY_DATABASE_URL` | Drill-only connection string whose database name ends in `_recovery` |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` | Individual settings for local development |
 | `READONLY_DB_PASSWORD` | Optional. When set, `init_db.py` provisions a SELECT-only `nba_readonly` role and the web app connects as it |
-| `RATE_LIMIT_ENABLED` | Enable public API rate limiting (default `true`) |
-| `RATE_LIMIT_REQUESTS` | Per-client ordinary API requests per window (default `600`) |
+| `RATE_LIMIT_ENABLED` | Enable public rate limiting (default `true`). Limiting covers the whole surface except `/health` and `/static/` |
+| `RATE_LIMIT_REQUESTS` | Per-client ordinary requests per window (default `600`) |
 | `RATE_LIMIT_EXPENSIVE_REQUESTS` | Per-client shot analytics/export requests per window (default `120`) |
+| `RATE_LIMIT_READY_REQUESTS` | Per-client `/ready` requests per window (default `600`), budgeted separately so public traffic cannot throttle the platform healthcheck |
 | `RATE_LIMIT_WINDOW_SECONDS` | Sliding rate-limit window (default `60`) |
+| `RATE_LIMIT_MAX_CLIENTS` | Cap on tracked client/group entries before least-recently-used eviction (default `10000`) |
+| `TRUSTED_PROXY_HOPS` | Hops appended by trusted proxies, counted from the right of `X-Forwarded-For` (default `1`, Railway's edge) |
 
 ## Deployment
 

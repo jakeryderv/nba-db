@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -14,12 +15,19 @@ from db.config import get_conninfo
 logger = logging.getLogger(__name__)
 
 _pool: ConnectionPool | None = None
+# Handlers are sync and run concurrently on a threadpool, so an unguarded
+# check-then-create here lets two cold requests build two pools and leak one.
+# The application opens the pool during lifespan startup; this lock keeps the
+# fallback path correct rather than relying on that ordering.
+_pool_lock = threading.Lock()
 
 
 def get_pool() -> ConnectionPool:
     """Get or create the connection pool."""
     global _pool
-    if _pool is None:
+    with _pool_lock:
+        if _pool is not None:
+            return _pool
         # The SELECT-only role is the expected production posture; owner
         # credentials are a deliberate, visible local-development fallback.
         readonly = bool(os.getenv("READONLY_DB_PASSWORD"))
@@ -43,9 +51,10 @@ def get_pool() -> ConnectionPool:
 def close_pool() -> None:
     """Close the connection pool."""
     global _pool
-    if _pool is not None:
-        _pool.close()
-        _pool = None
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
 
 
 @contextmanager
