@@ -52,9 +52,9 @@ The remaining steps run **after merge**. GitHub does not register `workflow_disp
 until a workflow exists on the default branch, and dispatching `maintenance.yml` from a
 branch runs `main`'s version rather than this one, so neither can be verified beforehand.
 
-- [ ] 7.2 Dispatch `maintenance.yml` (backup mode) to confirm the reconciler extraction is behavior-preserving against a real run.
-- [ ] 7.3 Dispatch both `production-watch.yml` modes and confirm each passes and files nothing.
-- [ ] 7.4 Force a failure via `api_url_override` and confirm an alert opens with the right title, a repeat comments rather than duplicating, and recovery closes it.
-- [ ] 7.5 Dispatch a restore drill against a real backup and confirm the manifest comparison and readiness proof pass and the pointer object is written.
-- [ ] 7.6 Note that the first freshness run will fail until 7.5 writes the first pointer; that is the check working, not a defect.
+- [x] 7.2 Dispatch `maintenance.yml` (backup mode) to confirm the reconciler extraction is behavior-preserving against a real run.
+- [x] 7.3 Dispatch both `production-watch.yml` modes and confirm each passes and files nothing.
+- [x] 7.4 Force a failure via `api_url_override` and confirm an alert opens with the right title, a repeat comments rather than duplicating, and recovery closes it.
+- [x] 7.5 Dispatch a restore drill against a real backup and confirm the manifest comparison and readiness proof pass and the pointer object is written.
+- [x] 7.6 Note that the first freshness run will fail until 7.5 writes the first pointer; that is the check working, not a defect.
 - [x] 7.7 Confirm `openspec validate` passes and close #46 and #49 in the implementing commit.
