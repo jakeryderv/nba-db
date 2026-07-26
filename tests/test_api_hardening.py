@@ -118,3 +118,23 @@ def test_comparison_endpoints_take_one_pool_checkout(client, monkeypatch) -> Non
     )
     assert teams.status_code == 200
     assert checkouts == 1
+
+
+def test_wait_queue_overflow_is_also_a_retryable_503(client, monkeypatch) -> None:
+    """TooManyRequests is a sibling of PoolTimeout, not a subclass.
+
+    Registering only PoolTimeout left the queue-full case falling through to the
+    catch-all, so ordinary overload returned 500 with a stack trace instead of a
+    retryable 503.
+    """
+    from psycopg_pool import TooManyRequests
+
+    def queue_full():
+        raise TooManyRequests("wait queue is full")
+
+    monkeypatch.setattr("app.main.get_cursor", queue_full)
+    response = client.get("/api/seasons")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"] == "Service busy; retry shortly"

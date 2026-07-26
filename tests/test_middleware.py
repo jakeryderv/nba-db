@@ -199,7 +199,7 @@ def test_short_forwarding_chain_is_reported(monkeypatch, caplog) -> None:
 
 def test_proxy_attributed_header_takes_precedence(monkeypatch) -> None:
     """CF-Connecting-IP wins over the forwarding chain when both are present."""
-    application = _limited_app(monkeypatch)
+    application = _limited_app(monkeypatch, env={"TRUSTED_EDGE": "cloudflare"})
 
     with TestClient(application) as client:
         # Same attributed client, different chains: one shared budget.
@@ -218,7 +218,7 @@ def test_proxy_attributed_header_takes_precedence(monkeypatch) -> None:
 
 def test_proxy_attributed_clients_keep_independent_budgets(monkeypatch) -> None:
     """Behind one edge, distinct callers must not share a budget."""
-    application = _limited_app(monkeypatch)
+    application = _limited_app(monkeypatch, env={"TRUSTED_EDGE": "cloudflare"})
     # Both arrive via the same edge address; only the attributed client differs.
     chain = "198.51.100.1"
 
@@ -238,7 +238,7 @@ def test_proxy_attributed_clients_keep_independent_budgets(monkeypatch) -> None:
 
 def test_malformed_attributed_header_falls_through(monkeypatch) -> None:
     """A value that is not an address must not become a key of its own."""
-    application = _limited_app(monkeypatch)
+    application = _limited_app(monkeypatch, env={"TRUSTED_EDGE": "cloudflare"})
 
     with TestClient(application) as client:
         first = client.get(
@@ -337,3 +337,62 @@ def test_internal_peer_detection() -> None:
     assert _is_internal_peer("203.0.113.7") is False
     assert _is_internal_peer("100.128.0.1") is False
     assert _is_internal_peer("testclient") is False
+
+
+def test_edge_header_is_ignored_without_a_declared_edge(monkeypatch) -> None:
+    """Without a declared edge the header is just caller-chosen input.
+
+    This is the staging case: publicly reachable with no Cloudflare in front.
+    Trusting the header there would let any caller mint a budget per request,
+    which is the exact defect the forwarded-hop derivation exists to avoid.
+    """
+    application = _limited_app(monkeypatch)  # TRUSTED_EDGE unset
+
+    with TestClient(application) as client:
+        first = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "198.51.100.1"},
+        )
+        second = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.8", "X-Forwarded-For": "198.51.100.1"},
+        )
+
+    # Both fell through to the forwarded hop, which is the same, so one budget.
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_edge_header_is_honored_once_the_edge_is_declared(monkeypatch) -> None:
+    application = _limited_app(monkeypatch, env={"TRUSTED_EDGE": "cloudflare"})
+
+    with TestClient(application) as client:
+        first = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "198.51.100.1"},
+        )
+        second = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.8", "X-Forwarded-For": "198.51.100.1"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_unrecognized_edge_declaration_trusts_nothing(monkeypatch) -> None:
+    """An unknown value must fail closed, not fall back to trusting the header."""
+    application = _limited_app(monkeypatch, env={"TRUSTED_EDGE": "some-other-cdn"})
+
+    with TestClient(application) as client:
+        first = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "198.51.100.1"},
+        )
+        second = client.get(
+            "/api/example",
+            headers={"CF-Connecting-IP": "203.0.113.8", "X-Forwarded-For": "198.51.100.1"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 429

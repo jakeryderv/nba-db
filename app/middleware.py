@@ -31,6 +31,9 @@ EXPENSIVE_PATHS = {"/api/shot-chart", "/api/shot-profile", "/api/shot-chart.csv"
 
 # Railway reaches the container from this range for internal probes.
 CARRIER_GRADE_NAT = ipaddress.ip_network("100.64.0.0/10")
+# The only edge whose client-address header this app knows how to trust. A
+# deployment declares it via TRUSTED_EDGE; anything else means trust nothing.
+CLOUDFLARE_EDGE = "cloudflare"
 # Longest textual IPv6 form, including an IPv4-mapped tail.
 MAX_ADDRESS_LENGTH = 45
 
@@ -126,18 +129,22 @@ class SlidingWindowLimiter:
             return True, 0
 
 
-def _proxy_attributed_client(request: Request) -> str | None:
+def _proxy_attributed_client(request: Request, trusted_edge: str) -> str | None:
     """Return the client address the nearest proxy attributes, if it set one.
 
-    Cloudflare overwrites CF-Connecting-IP on every proxied request, so unlike a
-    position within X-Forwarded-For it cannot be supplied by the caller at all.
-    It is also stable across topology changes: adding a proxy layer shifts which
-    position in the chain holds the client, but not this header.
+    Cloudflare overwrites CF-Connecting-IP on every proxied request, so where
+    Cloudflare is genuinely in front, that header cannot be supplied by the
+    caller at all. Where it is not, the header is just another string the caller
+    chose -- and keying a rate limiter on caller-chosen input imposes no limit.
 
-    Anything that does not parse as an address is ignored rather than used, so a
-    malformed value falls through to the positional derivation instead of
-    becoming a key of its own.
+    Nothing in a request proves which is the case: a caller can send any header,
+    and the peer address is the platform edge either way. So the deployment
+    declares it, and the declaration defaults to absent. An environment that is
+    not behind the edge is then safe by default rather than by omission, which
+    is the only ordering that fails in the safe direction.
     """
+    if trusted_edge != CLOUDFLARE_EDGE:
+        return None
     value = request.headers.get("cf-connecting-ip", "").strip()
     if not value or len(value) > MAX_ADDRESS_LENGTH:
         return None
@@ -148,7 +155,7 @@ def _proxy_attributed_client(request: Request) -> str | None:
     return value
 
 
-def _client_key(request: Request, trusted_hops: int = 1) -> str:
+def _client_key(request: Request, trusted_hops: int = 1, trusted_edge: str = "") -> str:
     """Identify the caller by an address they cannot choose.
 
     Preference order: the address the nearest proxy attributes, then the hop the
@@ -165,7 +172,7 @@ def _client_key(request: Request, trusted_hops: int = 1) -> str:
     not otherwise publicly reachable. If the app is ever exposed directly, a
     caller could supply the whole chain and this derivation stops being sound.
     """
-    attributed = _proxy_attributed_client(request)
+    attributed = _proxy_attributed_client(request, trusted_edge)
     if attributed:
         return attributed
 
@@ -280,6 +287,14 @@ class RequestPolicyMiddleware(BaseHTTPMiddleware):
         # One trusted hop: Railway's edge. Configurable so the position can be
         # corrected without a code change if the edge topology differs.
         self.trusted_hops = _positive_int("TRUSTED_PROXY_HOPS", 1)
+        # Which edge, if any, this deployment sits behind. Empty means none, so
+        # an environment without an edge in front never trusts an edge header.
+        self.trusted_edge = os.getenv("TRUSTED_EDGE", "").strip().lower()
+        if self.trusted_edge and self.trusted_edge != CLOUDFLARE_EDGE:
+            logger.warning(
+                "TRUSTED_EDGE=%r is not recognized; no edge client-address header will be trusted",
+                self.trusted_edge,
+            )
         self.limiter = SlidingWindowLimiter(
             _positive_int("RATE_LIMIT_WINDOW_SECONDS", 60),
             max_keys=_positive_int("RATE_LIMIT_MAX_CLIENTS", 10_000),
@@ -308,7 +323,7 @@ class RequestPolicyMiddleware(BaseHTTPMiddleware):
         if classification is not None:
             group, limit = classification
             allowed, retry_after = self.limiter.check(
-                _client_key(request, self.trusted_hops), group, limit
+                _client_key(request, self.trusted_hops, self.trusted_edge), group, limit
             )
             if not allowed:
                 response: Response = JSONResponse(
