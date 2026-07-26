@@ -19,11 +19,15 @@ def markdown_files(paths: Sequence[str]) -> list[Path]:
         return sorted(
             {Path(path) for path in paths if Path(path).suffix.lower() in {".md", ".mdx"}}
         )
-    tracked_docs = [Path("README.md")]
-    if Path("docs").is_dir():
-        tracked_docs.extend(Path("docs").rglob("*.md"))
-        tracked_docs.extend(Path("docs").rglob("*.mdx"))
-    return sorted(path for path in tracked_docs if path.is_file())
+    # Every tracked Markdown surface a reader can reach: the root files GitHub
+    # renders, the documentation tree, and the issue and pull-request templates.
+    # Adding a document should not silently opt it out of these checks.
+    tracked_docs = [Path(name) for name in ("README.md", "CONTRIBUTING.md", "SECURITY.md")]
+    for directory in (Path("docs"), Path(".github")):
+        if directory.is_dir():
+            tracked_docs.extend(directory.rglob("*.md"))
+            tracked_docs.extend(directory.rglob("*.mdx"))
+    return sorted({path for path in tracked_docs if path.is_file()})
 
 
 def check_file(path: Path) -> list[str]:

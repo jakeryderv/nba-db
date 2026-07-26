@@ -23,37 +23,9 @@ A read-only web app and REST API for exploring NBA statistics — standings, sta
 
 ## API
 
-All endpoints are read-only. Interactive docs at `/docs`.
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Health check |
-| `GET /ready` | Verified default-season readiness and critical row counts |
-| `GET /api/seasons` | Loaded seasons |
-| `GET /api/dataset-status` | Dataset freshness, verification, manifest, and row counts |
-| `GET /api/teams` | All teams |
-| `GET /api/teams/{id}` | Team by ID |
-| `GET /api/teams/{id}/stats` | Team record, splits, and season averages |
-| `GET /api/teams/{id}/players` | Team player averages, ranked by scoring |
-| `GET /api/players` | Players (case-insensitive `?search=`, `?active=`, pagination) |
-| `GET /api/players/{id}` | Player by ID |
-| `GET /api/players/{id}/stats` | Player season averages |
-| `GET /api/players/{id}/games` | Paginated player game log |
-| `GET /api/shot-chart/players` | Players with shot attempts in a season |
-| `GET /api/shot-chart/games` | Games with attempts for one player or team |
-| `GET /api/shot-chart/action-types` | Available action types in the loaded season |
-| `GET /api/shot-chart` | Player or team locations, efficiency, frequency, and league-relative zone analytics |
-| `GET /api/shot-profile` | Five-zone profile plus venue, month, opponent, and All-Star-break splits |
-| `GET /api/shot-chart.csv` | Complete filtered player or team shot-attempt export |
-| `GET /api/comparisons/players` | Compare exactly two players for a season |
-| `GET /api/comparisons/teams` | Compare two teams, including head-to-head results |
-| `GET /api/games` | Games (filter by `?season=`, `?team_id=`) |
-| `GET /api/games/{id}` | Game by ID |
-| `GET /api/games/{id}/boxscore` | Full box score |
-| `GET /api/team-game-stats` | Team box-score lines (by season) |
-| `GET /api/player-game-stats` | Player box-score lines (by season) |
-| `GET /api/leaders/{stat}` | Qualified stat leaders (points, rebounds, assists, steals, blocks) |
-| `GET /api/standings` | League standings (`?season=` required) |
+All endpoints are read-only. **[Interactive documentation](https://nba.jvs.sh/docs)** is generated
+from the running application, so it is the authoritative endpoint reference and cannot drift from
+the code.
 
 ```bash
 curl "https://nba.jvs.sh/api/players?search=lebron"
@@ -114,183 +86,12 @@ The local hooks are intentionally tiered:
 
 Hooks are fast developer feedback and can be bypassed with `--no-verify`; GitHub Actions remains the trusted merge gate. If a pre-push comparison cannot be calculated, it fails safe to the full pipeline. Install both hooks with `make hooks-install`, run lightweight hooks manually with `make hooks-run`, or invoke the affected pre-push gate with `make pre-push`.
 
-## Safe season lifecycle
+## Operating the data
 
-The guarded lifecycle handles exactly one NBA **Regular Season** dataset at a time. Preseason, All-Star, Play-In, and playoff datasets are outside this workflow's scope. Run extraction and official verification from a trusted machine that can reach `stats.nba.com`; GitHub Actions uses deterministic fixtures and its ephemeral PostgreSQL service, never calls NBA endpoints, and never loads production.
-
-### 1. Build and validate one season
-
-Choose the season deliberately. This force-downloads fresh source data, including bounded `ShotChartDetail` responses for all 30 teams, transforms it, validates file relationships and official Regular Season game IDs in the `002.......` format, then compares calculated team and player counting-stat totals with the NBA's `LeagueDashTeamStats` and `LeagueDashPlayerStats` totals. Per-team requests are deliberate because the NBA endpoint silently caps an all-league shot response at 102,400 rows. Shot makes, player/team identity, and 3PT makes must match each player-game box score exactly. FGA and 3PA may differ by one for a documented NBA source correction; every accepted difference is recorded in `manifest.json`, while anything larger fails closed. Games played, records, and points must match exactly. Other counting stats use the same documented one-count correction policy because NBA game-log and aggregate feeds can diverge after stat corrections; every difference remains visible in the report. Only a passing `data/clean/<season>/verification.json` can be bound into the manifest with source scope, row counts, and SHA-256 checksums for all six transformed files.
-
-```bash
-make season-build SEASON=2025-26
-uv run python -m json.tool data/clean/2025-26/manifest.json
-uv run python -m json.tool data/clean/2025-26/verification.json
-```
-
-The equivalent trusted-machine Dagger build requires an explicit freshness key so a changing external NBA response cannot be confused with a deterministic cached input. It returns a typed directory that must be deliberately exported to the host:
-
-```bash
-dagger call season-build \
-  --season=2025-26 \
-  --refresh-key=2026-07-22T010000Z \
-  export --path=data
-```
-
-To build, load, and serve the season entirely in disposable Dagger services, use a unique operation ID and leave the command running:
-
-```bash
-dagger up local-refresh \
-  --season=2025-26 \
-  --refresh-key=2026-07-22T010000Z \
-  --operation-id=local-refresh-2026-07-22T010000Z
-```
-
-To rerun only the network-backed cross-check after transformation, use `make verify-official SEASON=2025-26`. Do not edit transformed files after verification or manifest creation. The report records every transformed-file checksum, and local load and production promotion fail closed if the dataset, report, or manifest changed. This check validates season totals; the existing relational and API tests still cover per-game calculations and application behavior.
-
-### 2. Replace the local database
-
-Start PostgreSQL, ensure no production URL is present, then load the manifested season locally:
-
-```bash
-make db-start
-unset DATABASE_URL PRODUCTION_DATABASE_URL
-make season-load-local SEASON=2025-26
-```
-
-After exporting a Dagger season build, the persistent Docker Compose database can instead be loaded through an explicitly granted host-service tunnel:
-
-```bash
-dagger call local-load \
-  --database=tcp://localhost:5432 \
-  --season=2025-26 \
-  --confirm-local-target='LOCAL DOCKER DATABASE' \
-  --operation-id=local-load-2026-07-22T010000Z
-```
-
-`local-load` has no network extraction step. It verifies the exported manifest again and uses the same exact one-season replacement logic as the Make workflow. The required operation ID prevents a mutating execution layer from being reused accidentally.
-
-This is an exact one-season replacement: all other local season rows are removed inside the replacement transaction, including shot attempts. Verify the local API, shot totals, and visualizations before considering production promotion. There is no raw load or multi-season Make target. `refresh` exists only as a compatibility alias for the same guarded build and localhost replacement; it is not a production promotion path.
-
-### 3. Promote with backup and typed confirmations
-
-Promotion requires the dedicated `PRODUCTION_DATABASE_URL` environment variable. It is never accepted as a CLI argument and is intentionally distinct from the app's ordinary `DATABASE_URL`. Read the secret without echoing it or storing it in shell history:
-
-```bash
-read -rsp "Production database URL: " PRODUCTION_DATABASE_URL
-printf '\n'
-export PRODUCTION_DATABASE_URL
-```
-
-Create a protected backup directory outside the repository, then run promotion. The backup file must be a new path; the command refuses to overwrite an existing file.
-
-```bash
-install -d -m 700 "$HOME/.local/share/nba-db/backups"
-make season-promote \
-  SEASON=2025-26 \
-  TARGET=production \
-  CONFIRM_SEASON=2025-26 \
-  CONFIRM_SINGLE_SEASON='DELETE OTHER SEASONS' \
-  BACKUP_FILE="$HOME/.local/share/nba-db/backups/nba-db-before-2025-26-20260721T180000Z.dump" \
-  API_URL=https://nba.jvs.sh
-unset PRODUCTION_DATABASE_URL
-```
-
-Dagger also exposes the same guarded promotion and returns the backup as a typed file. The database URL is introduced as a Dagger secret, while the data directory and backup destination remain explicit host grants:
-
-```bash
-dagger call promote \
-  --season=2025-26 \
-  --confirm-season=2025-26 \
-  --confirm-single-season='DELETE OTHER SEASONS' \
-  --api-url=https://nba.jvs.sh \
-  --backup-name=nba-db-before-2025-26-20260722T010000Z.dump \
-  --operation-id=production-2025-26-20260722T010000Z \
-  --production-database-url=env:PRODUCTION_DATABASE_URL \
-  export --path="$HOME/.local/share/nba-db/backups/nba-db-before-2025-26-20260722T010000Z.dump"
-unset PRODUCTION_DATABASE_URL
-```
-
-The typed confirmations remain enforced inside the lifecycle command. Neither GitHub Actions nor Railway receives `PRODUCTION_DATABASE_URL`, calls `stats.nba.com`, or invokes these mutating functions.
-
-Promotion verifies the manifest again, rejects local database targets, and takes a database advisory lock held from the protected custom-format `pg_dump` through the final live smoke check. It atomically replaces production so it contains exactly the confirmed season, then checks live health, season metadata, game identity/count, a sampled box score, standings, and points leaders against the manifest and promoted season. The API smoke check retries briefly; if it ultimately fails, the database replacement has already committed, so investigate immediately and restore the backup if the promoted data is not acceptable.
-
-Before production promotion, load the same manifested data into an isolated staging database and
-smoke-test the staging app. Keep staging and production in separate Railway environments with
-separate PostgreSQL services and variables. Export the staging secret rather than passing it on the
-command line:
-
-```bash
-export STAGING_DATABASE_URL
-make season-stage \
-  TARGET=staging \
-  CONFIRM_SEASON=2025-26 \
-  STAGING_API_URL=https://your-staging-app.example
-unset STAGING_DATABASE_URL
-```
-
-The staging command refuses local routes and refuses to run when staging and production URLs are
-the same. It applies migrations, replaces staging with the manifested season, and runs the same live
-API smoke suite. Smoke requests force cache revalidation.
-
-### Backup restore guidance
-
-Keep the reported backup path and restrict access to it. Run the executable restore drill against a
-database name ending in `_recovery`; the command refuses an existing database, inspects the archive,
-restores it, verifies the one-season provenance counts, and removes the disposable database even
-when verification fails:
-
-```bash
-export RECOVERY_DATABASE_URL='postgresql://.../nba_recovery'
-make restore-drill \
-  BACKUP_FILE="$HOME/.local/share/nba-db/backups/<backup>.dump" \
-  RESTORE_CONFIRM='RESTORE nba_recovery'
-unset RECOVERY_DATABASE_URL
-```
-
-Only after this drill passes should an operator schedule a controlled production restore. A real
-production restore remains a manual incident operation because it replaces the entire database
-state, including seasons that promotion removed.
-
-The same drill can run without host PostgreSQL client tools by passing the backup as a typed Dagger
-file. Dagger creates and removes an isolated PostgreSQL 18 service for the operation:
-
-```bash
-dagger call restore-backup \
-  --backup="$HOME/.local/share/nba-db/backups/<backup>.dump" \
-  --season=2025-26 \
-  --source=.
-```
-
-### Production monitoring
-
-`/health` checks database connectivity while `/ready` additionally fails unless the verified default
-season and its critical row counts match provenance metadata. Every response carries an
-`X-Request-ID`, `Server-Timing`, and `X-Response-Time-Ms`; application logs include the same request
-ID and elevate requests over one second.
-
-Run a bounded live contract check at any time:
-
-```bash
-make live-check API_URL=https://nba.jvs.sh
-```
-
-The scheduled and manually dispatched GitHub workflow runs this check using the configured
-`LIVE_API_URL` repository variable. Its expected production totals are 1,230 games, 582
-participating players, and 219,160 shots. Count drift, readiness failure, missing telemetry or
-release headers, inconsistent release revisions, a response over three seconds, or a broken
-core/shot exploration endpoint fails the job. Use Railway's HTTP metrics and logs with the returned
-request ID to investigate latency or errors.
-
-After every successful `main` CI run, the production release observer waits up to ten minutes for
-Railway to serve that exact Git SHA, then reruns the complete live contract. Failed CI, a stale or
-failed Railway deployment, and a broken live contract create or update a `production-alert` GitHub
-issue. A later successful observation closes the incident automatically.
-
-The public API applies a process-local sliding-window limit per client. Ordinary API reads default
-to 600 requests per minute; the aggregate-heavy shot chart, shot profile, and CSV routes default to
-120. Large responses use gzip when the client advertises support. Override the limits with the
-documented environment variables only after reviewing production traffic.
+Loading a season replaces the entire contents of a database, so every command that touches staging
+or production is operator-only and requires typed confirmations. The full runbook — building and
+verifying a season, replacing the local database, promoting with a backup, and restoring from one —
+is in **[docs/operations/season-lifecycle.md](docs/operations/season-lifecycle.md)**.
 
 ## Testing
 
@@ -321,71 +122,22 @@ make dagger-check # full portable merge gate, including PostgreSQL/browser tests
 | `RATE_LIMIT_MAX_CLIENTS` | Cap on tracked client/group entries before least-recently-used eviction (default `10000`) |
 | `TRUSTED_PROXY_HOPS` | Hops appended by trusted proxies, counted from the right of `X-Forwarded-For` (default `1`, Railway's edge). Only consulted when `CF-Connecting-IP` is absent: a proxy-set header the edge overwrites on every request is preferred, because it stays correct when a proxy layer is added and a counted position does not |
 
-## Deployment
+## Deployment and monitoring
 
-Deployed on [Railway](https://railway.com) (`railway.toml`) after the required GitHub check succeeds:
-Railpack installs only runtime dependencies, `scripts/init_db.py` applies pending checksum-tracked
-schema migrations and refreshes the read-only role, then uvicorn serves the app. The deploy command
-uses `uv run --no-sync`, preventing development tools and ETL-only scientific packages from being
-installed during startup. Set `DATABASE_URL` (provided by the Railway Postgres plugin) and
-`READONLY_DB_PASSWORD` on the service.
+Merging to `main` deploys to production on Railway, gated by the `/ready` healthcheck and verified
+afterward by the release observer. Deployment, artifact retention, scheduled maintenance, product
+signals, and monitoring are documented in
+**[docs/operations/deployment.md](docs/operations/deployment.md)**.
 
-Schema migration files are immutable after they have been applied. To change the database, add the next numbered file under `db/schema/`; editing an applied file causes initialization to fail with a checksum error.
+What changed in production and when is recorded in
+[docs/operations/changelog.md](docs/operations/changelog.md); the current verified state is in
+[docs/operations/production-status.md](docs/operations/production-status.md).
 
-### Verified artifact retention
+## Contributing
 
-The production Railway project contains the `nba-db-artifacts` S3-compatible bucket. Archive the
-raw NBA responses, clean CSVs, verification report, and manifest only after manifest verification
-passes. The command refuses repository-local output and existing filenames, writes a SHA-256
-sidecar and JSON receipt, and verifies checksum metadata after upload.
-
-```bash
-install -d -m 700 "$HOME/.local/share/nba-db/artifacts"
-bucket_credentials="$(railway bucket credentials --bucket nba-db-artifacts \
-  --environment production --json)"
-export AWS_ENDPOINT_URL="$(jq -r '.endpoint' <<< "$bucket_credentials")"
-export AWS_ACCESS_KEY_ID="$(jq -r '.accessKeyId' <<< "$bucket_credentials")"
-export AWS_SECRET_ACCESS_KEY="$(jq -r '.secretAccessKey' <<< "$bucket_credentials")"
-export AWS_DEFAULT_REGION="$(jq -r '.region' <<< "$bucket_credentials")"
-export AWS_S3_BUCKET_NAME="$(jq -r '.bucketName' <<< "$bucket_credentials")"
-export AWS_S3_URL_STYLE="$(jq -r '.urlStyle' <<< "$bucket_credentials")"
-make artifact-upload SEASON=2025-26 ARTIFACT_DIR="$HOME/.local/share/nba-db/artifacts"
-make backup-upload SEASON=2025-26 BACKUP_FILE="$HOME/.local/share/nba-db/backups/<backup>.dump"
-unset bucket_credentials
-unset AWS_ENDPOINT_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_S3_BUCKET_NAME AWS_DEFAULT_REGION AWS_S3_URL_STYLE
-```
-
-The uploader is an operator-only optional dependency (`uv run --extra ops`) and is not imported by
-the web service. Object keys are versioned beneath `verified-seasons/<season>/` using an archive name
-that includes the verified manifest checksum.
-
-### Automated maintenance
-
-The `Production Maintenance` workflow creates a PostgreSQL 18 custom-format backup every day at
-08:13 UTC, uploads it with manifest and SHA-256 metadata, and deletes backups older than 30 days
-while always retaining at least the newest seven copies. On the first day of each month at 09:43
-UTC, it downloads the newest retained object, verifies its checksum, and runs the real Dagger
-restore drill against isolated PostgreSQL 18. The workflow can also run either operation manually.
-
-The workflow uses encrypted GitHub Actions secrets for `PRODUCTION_DATABASE_URL`,
-`AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`. Endpoint, bucket, region, URL style, and live API
-URL are non-secret repository variables. A failed backup or restore creates or updates a visible
-`production-alert` issue; the next successful maintenance run closes it.
-
-### Anonymous product signals
-
-The dashboard records a small allowlist of anonymous events—section views, comparisons, shot-chart
-builds, CSV exports, and link sharing—to structured Railway logs. It sends no names, search terms,
-player/team selections, cookies, or persistent browser identifiers. Use these signals with HTTP
-metrics before prioritizing further navigation or workflow changes:
-
-```bash
-railway logs --service nba-api --environment production --since 7d \
-  --filter 'Usage event=' --lines 500 --json
-```
-
-Every hash-routed view now has a `Copy view link` action, preserving the existing shareable player,
-team, game, comparison, and shot-chart URLs. CSV export remains available from built shot charts.
+Setup, the checks to run, and the safety rails are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Behavior is governed by the specs in `openspec/specs/` — where a spec exists, it wins over the
+code and this README.
 
 ## Roadmap
 
