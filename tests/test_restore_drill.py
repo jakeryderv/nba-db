@@ -117,6 +117,7 @@ def test_restore_omits_environment_specific_owners_and_acls(monkeypatch, tmp_pat
         "2025-26",
         expected_manifest_sha256=DIGEST,
         prove_servable=False,
+        check_data_quality=False,
         runner=runner,
     )
 
@@ -155,7 +156,12 @@ def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path, monk
         )
     try:
         create_backup(config, backup)
-        report = run_restore_drill(backup, recovery, SEED_SEASON, expected_manifest_sha256=DIGEST)
+        # The seed fixture holds two teams and ten games, so the data-quality
+        # checks correctly reject it; they are exercised against real data by the
+        # scheduled drill instead.
+        report = run_restore_drill(
+            backup, recovery, SEED_SEASON, expected_manifest_sha256=DIGEST, check_data_quality=False
+        )
         assert report["games"] == 10
         assert report["players"] == 3
         assert report["shot_attempts"] == 295
@@ -207,7 +213,13 @@ def test_restore_drill_rejects_a_backup_from_a_different_dataset(
     try:
         create_backup(config, backup)
         with pytest.raises(RestoreDrillError, match="does not match"):
-            run_restore_drill(backup, recovery, SEED_SEASON, expected_manifest_sha256=OTHER_DIGEST)
+            run_restore_drill(
+                backup,
+                recovery,
+                SEED_SEASON,
+                expected_manifest_sha256=OTHER_DIGEST,
+                check_data_quality=False,
+            )
     finally:
         with get_cursor() as cur:
             cur.execute(
@@ -219,3 +231,51 @@ def test_restore_drill_rejects_a_backup_from_a_different_dataset(
                 """,
                 (SEED_SEASON,),
             )
+
+
+def test_data_quality_failure_fails_the_drill() -> None:
+    """A restored dataset that fails its checks must not report a passing drill."""
+    from scripts import restore_drill
+
+    class Result:
+        returncode = 1
+        stdout = "db/tests/test_data_quality.py::test_teams_not_empty FAILED\n1 failed"
+        stderr = ""
+
+    with pytest.raises(RestoreDrillError, match="failed quality checks"):
+        restore_drill.verify_restored_data_quality(
+            {"dbname": "nba_db_recovery", "host": "database", "user": "nba_user"},
+            "2025-26",
+            runner=lambda *_args, **_kwargs: Result(),
+        )
+
+
+def test_data_quality_runs_against_the_restored_database_not_the_ambient_one() -> None:
+    """The checks must be pointed at the recovery database the drill just made.
+
+    Inheriting an ambient DATABASE_URL would quietly validate whatever database
+    the operator happened to have configured, and report it as the backup's.
+    """
+    from scripts import restore_drill
+
+    captured: dict = {}
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def runner(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env", {})
+        return Result()
+
+    restore_drill.verify_restored_data_quality(
+        {"dbname": "nba_db_recovery", "host": "database", "user": "nba_user"},
+        "2025-26",
+        runner=runner,
+    )
+
+    assert "nba_db_recovery" in captured["env"]["DATABASE_URL"]
+    assert captured["env"]["DATA_QUALITY_SEASON"] == "2025-26"
+    assert any("db/tests" in str(part) for part in captured["command"])

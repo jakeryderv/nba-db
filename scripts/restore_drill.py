@@ -138,6 +138,41 @@ def prepare_restored_database(config: dict[str, Any]) -> None:
         ensure_readonly_role(conn)
 
 
+def verify_restored_data_quality(
+    config: dict[str, Any],
+    season: str,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Run the data-quality checks against the restored database.
+
+    These assert properties of the data itself -- referential integrity, natural
+    key uniqueness, shot detail reconciling to box scores, recorded provenance
+    matching the rows present. They cannot run in the pull-request pipeline,
+    whose fixture seeds two teams and ten games, so the drill is the gate where
+    real data actually exists.
+
+    The connection string goes through the environment rather than the command
+    line so it does not appear in a process listing.
+    """
+    environment = os.environ.copy()
+    environment["DATABASE_URL"] = make_conninfo("", **config)
+    environment["DATA_QUALITY_SEASON"] = season
+    environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    environment["PYTHONPATH"] = str(PROJECT_ROOT)
+    result = runner(
+        [sys.executable, "-m", "pytest", str(PROJECT_ROOT / "db" / "tests"), "-q"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stdout or result.stderr or "").strip().splitlines()
+        tail = "\n".join(detail[-20:]) or "pytest gave no output"
+        raise RestoreDrillError(f"Restored data failed quality checks:\n{tail}")
+
+
 def verify_restored_database_can_serve(config: dict[str, Any], season: str) -> dict[str, Any]:
     """Assert the readiness contract against the restored database as the app's role.
 
@@ -169,6 +204,7 @@ def run_restore_drill(
     *,
     expected_manifest_sha256: str | None = None,
     prove_servable: bool = True,
+    check_data_quality: bool = True,
     runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
     if not backup_file.is_file() or backup_file.is_symlink():
@@ -224,6 +260,11 @@ def run_restore_drill(
         if prove_servable:
             prepare_restored_database(config)
             report["readiness"] = verify_restored_database_can_serve(config, season)
+        if check_data_quality:
+            # Runs before the finally-block drop: the checks need the database
+            # the drill is about to dispose of.
+            verify_restored_data_quality(config, season)
+            report["data_quality"] = "passed"
         return report
     finally:
         if created:
@@ -247,6 +288,11 @@ def main() -> None:
         required=True,
         help="Manifest digest recorded on the backup object, compared against the restored data",
     )
+    parser.add_argument(
+        "--skip-data-quality",
+        action="store_true",
+        help="Skip the data-quality checks. Only for a database that is not a full season.",
+    )
     args = parser.parse_args()
     database_url = os.getenv("RECOVERY_DATABASE_URL")
     if not database_url:
@@ -258,6 +304,7 @@ def main() -> None:
             config,
             args.season,
             expected_manifest_sha256=args.manifest_sha256,
+            check_data_quality=not args.skip_data_quality,
         )
     except RestoreDrillError as exc:
         parser.exit(2, f"ERROR: {exc}\n")
@@ -266,7 +313,8 @@ def main() -> None:
         f"Restore drill passed and disposable database removed: {args.season} · "
         f"{report['games']} games · {report['shot_attempts']} shots · "
         f"manifest {args.manifest_sha256[:12]} · "
-        f"readiness {readiness.get('status', 'unproven')} as the app's read-only role"
+        f"readiness {readiness.get('status', 'unproven')} as the app's read-only role · "
+        f"data quality {report.get('data_quality', 'skipped')}"
     )
 
 
