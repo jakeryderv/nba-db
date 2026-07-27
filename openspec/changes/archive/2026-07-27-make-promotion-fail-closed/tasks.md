@@ -32,4 +32,4 @@
 - [x] 5.2 Run `make dagger-check`.
 - [x] 5.3 Run `openspec validate`.
 - [x] 5.4 Confirm no lifecycle command was executed and no production credential handled while implementing this.
-- [ ] 5.5 Close #28 in the implementing commit.
+- [x] 5.5 Close #28 in the implementing commit.
