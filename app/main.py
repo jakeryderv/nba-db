@@ -53,6 +53,7 @@ from app.models import (
     UsageEvent,
 )
 from app.readiness import evaluate_readiness
+from app.shot_context import league_context_cache
 from app.shot_filters import HomeAway, ShotType, shot_query_parts
 from nba_config import ALL_STAR_BREAK_END, DEFAULT_SEASON
 
@@ -862,19 +863,42 @@ def get_shot_chart(
         summary = cur.fetchone()
 
         league_fg_pct = None
+        context_key: tuple | None = None
         if made is None:
-            cur.execute(
-                f"""
-                SELECT ROUND(
-                    COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
-                    / NULLIF(COUNT(*), 0), 3
-                ) AS fg_pct
-                {joins}
-                WHERE {context_where_clause}
-                """,
-                context_params,
+            # Read the season's load stamp on the cursor already held, so the memo
+            # key carries its own validity. Promotion replaces rows without
+            # restarting the process, so a key without this would go stale with no
+            # error and no expiry to correct it.
+            cur.execute("SELECT loaded_at FROM seasons WHERE id = %s", (season,))
+            loaded_row = cur.fetchone()
+            # `joins` is constant today, so the league context is subject-independent
+            # and a team's entry is correctly reused by a player request. It is in the
+            # key anyway: if it ever becomes conditional, the key changes with it
+            # rather than silently serving one subject's aggregate to another.
+            context_key = (
+                context_where_clause,
+                tuple(context_params),
+                joins,
+                loaded_row["loaded_at"] if loaded_row else None,
             )
-            league_fg_pct = cur.fetchone()["fg_pct"]
+
+            def _compute_league_fg_pct():
+                cur.execute(
+                    f"""
+                    SELECT ROUND(
+                        COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
+                        / NULLIF(COUNT(*), 0), 3
+                    ) AS fg_pct
+                    {joins}
+                    WHERE {context_where_clause}
+                    """,
+                    context_params,
+                )
+                return cur.fetchone()["fg_pct"]
+
+            league_fg_pct = league_context_cache.get_or_compute(
+                ("fg_pct", *context_key), _compute_league_fg_pct
+            )
 
         cur.execute(
             f"""
@@ -922,26 +946,34 @@ def get_shot_chart(
         zone_rows = cur.fetchall()
 
         league_zones: dict[tuple[str, str, str], float | None] = {}
-        if made is None:
-            cur.execute(
-                f"""
-                SELECT sa.zone_basic, sa.zone_area, sa.zone_range,
-                       ROUND(
-                           COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
-                           / NULLIF(COUNT(*), 0), 3
-                       ) AS fg_pct
-                {joins}
-                WHERE {context_where_clause}
-                GROUP BY sa.zone_basic, sa.zone_area, sa.zone_range
-                """,
-                context_params,
-            )
-            league_zones = {
-                (row["zone_basic"], row["zone_area"], row["zone_range"]): (
-                    float(row["fg_pct"]) if row["fg_pct"] is not None else None
+        if made is None and context_key is not None:
+
+            def _compute_league_zones() -> dict[tuple[str, str, str], float | None]:
+                cur.execute(
+                    f"""
+                    SELECT sa.zone_basic, sa.zone_area, sa.zone_range,
+                           ROUND(
+                               COUNT(*) FILTER (WHERE sa.shot_made)::NUMERIC
+                               / NULLIF(COUNT(*), 0), 3
+                           ) AS fg_pct
+                    {joins}
+                    WHERE {context_where_clause}
+                    GROUP BY sa.zone_basic, sa.zone_area, sa.zone_range
+                    """,
+                    context_params,
                 )
-                for row in cur.fetchall()
-            }
+                return {
+                    (row["zone_basic"], row["zone_area"], row["zone_range"]): (
+                        float(row["fg_pct"]) if row["fg_pct"] is not None else None
+                    )
+                    for row in cur.fetchall()
+                }
+
+            # Read-only downstream: the response is built from this map, never into
+            # it, so the cached object is never mutated.
+            league_zones = league_context_cache.get_or_compute(
+                ("zones", *context_key), _compute_league_zones
+            )
 
     total = summary["attempts"]
     zones = []
