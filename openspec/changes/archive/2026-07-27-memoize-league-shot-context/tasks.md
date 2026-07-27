@@ -29,12 +29,12 @@
 ## 5. Spec
 
 - [x] 5.1 Run `openspec validate`.
-- [ ] 5.2 At archive time, verify the `RENAMED` plus `MODIFIED` delta actually applied: `openspec/specs/public-api-surface/spec.md` must carry the renamed header, the full generalized text, and all four scenarios. No prior change in this repo has used `RENAMED`, and validation is not the archiver.
-- [ ] 5.3 Fill in a real Purpose if the archiver stamps a placeholder, rather than leaving a `TBD`.
+- [x] 5.2 At archive time, verify the `RENAMED` plus `MODIFIED` delta actually applied: `openspec/specs/public-api-surface/spec.md` must carry the renamed header, the full generalized text, and all four scenarios. No prior change in this repo has used `RENAMED`, and validation is not the archiver.
+- [x] 5.3 Fill in a real Purpose if the archiver stamps a placeholder, rather than leaving a `TBD`.
 
 ## 6. Verification
 
 - [x] 6.1 Run `make check` and `make test` and show the output.
 - [x] 6.2 Run `make dagger-check`.
-- [ ] 6.3 Record measured after-numbers against production once deployed, and state the improvement in measured terms.
-- [ ] 6.4 Close #48 in the implementing commit.
+- [x] 6.3 Record measured after-numbers against production once deployed, and state the improvement in measured terms.
+- [x] 6.4 Close #48 in the implementing commit.
