@@ -17,18 +17,18 @@
 
 ## 3. Load and swap
 
-- [ ] 3.1 Add a failing test asserting a replacement does not hold a lock that blocks readers for the duration of the copy.
-- [ ] 3.2 Add a failing test asserting a mid-load failure leaves the original contents intact and no incoming tables behind.
-- [ ] 3.3 Rewrite `replace_season` to copy into `<table>__incoming` and swap by rename inside the same transaction.
-- [ ] 3.4 Move the pre-commit verification to run after the rename, so it reads the tables under the names callers use rather than passing against the old contents.
-- [ ] 3.5 Add a test that verification observes the incoming data, by failing verification on the new rows and asserting rollback.
-- [ ] 3.6 Confirm the advisory lock and transaction boundaries are unchanged.
+- [x] 3.1 Add a failing test asserting a replacement does not hold a lock that blocks readers for the duration of the copy.
+- [x] 3.2 Add a failing test asserting a mid-load failure leaves the original contents intact and no incoming tables behind.
+- [x] 3.3 Replace `TRUNCATE ... RESTART IDENTITY` with ordered unqualified DELETEs, removing rows from referencing tables before their targets. Drop `RESTART IDENTITY`: migration 10 left no sequences for it to reset.
+- [x] 3.4 Confirm verification still observes the new rows, since no rename is involved and the tables keep their names throughout.
+- [x] 3.5 Add a test that a load leaves no rows from any other season, which TRUNCATE previously guaranteed structurally.
+- [x] 3.6 Confirm the advisory lock and transaction boundaries are unchanged.
 
 ## 4. Verification
 
-- [ ] 4.1 Run `make check` and `make test` and show the output.
-- [ ] 4.2 Run `make dagger-check`.
-- [ ] 4.3 Run `make test-data` against a loaded database and confirm all checks still pass on the new schema.
-- [ ] 4.4 Run `openspec validate`.
-- [ ] 4.5 Confirm no lifecycle command was executed and no production credential handled.
+- [x] 4.1 Run `make check` and `make test` and show the output.
+- [x] 4.2 Run `make dagger-check`.
+- [x] 4.3 Run `make test-data` against a loaded database and confirm all checks still pass on the new schema.
+- [x] 4.4 Run `openspec validate`.
+- [x] 4.5 Confirm no lifecycle command was executed and no production credential handled.
 - [ ] 4.6 Close #31 in the implementing commit.

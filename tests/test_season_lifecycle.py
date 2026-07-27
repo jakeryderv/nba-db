@@ -1541,3 +1541,81 @@ def test_staging_also_verifies_before_committing() -> None:
     source = inspect.getsource(lifecycle.main)
     stage_branch = source.split('if args.command == "stage":')[1].split("if args.confirm")[0]
     assert "verify=" in stage_branch, "stage does not run pre-commit verification"
+
+
+def test_single_season_load_holds_no_reader_blocking_lock(valid_root: Path, client) -> None:
+    """Assert the lock modes, not a symptom.
+
+    TRUNCATE takes ACCESS EXCLUSIVE and holds it to commit, so readers blocked
+    for the length of the load. Reading from a second connection would show
+    that, but only for the tables it happens to read and only if it races the
+    writer correctly. Asking pg_locks what the writer actually holds proves the
+    property for every table at once and cannot pass by timing luck.
+    """
+    del client
+    import psycopg
+
+    from db.config import get_db_config
+
+    lifecycle.generate_manifest(valid_root, SEASON)
+    dataset = lifecycle.verify_manifest(valid_root, SEASON)
+    config = get_db_config()
+
+    # Modes that conflict with the AccessShareLock a plain reader takes.
+    blocking_modes = {"AccessExclusiveLock", "ExclusiveLock", "ShareRowExclusiveLock"}
+    held: list[tuple[str, str]] = []
+
+    def observe(conn):
+        with psycopg.connect(**config) as watcher, watcher.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.relname, l.mode
+                FROM pg_locks l
+                JOIN pg_class c ON c.oid = l.relation
+                WHERE l.pid = %s AND c.relkind = 'r' AND l.granted
+                """,
+                (conn.info.backend_pid,),
+            )
+            held.extend(cur.fetchall())
+        raise lifecycle.PromotionSafetyError("observed")
+
+    with psycopg.connect(**config) as writer:
+        with pytest.raises(lifecycle.PromotionSafetyError, match="observed"):
+            lifecycle.replace_season(
+                writer,
+                dataset,
+                single_season=True,
+                acquire_advisory_lock=False,
+                verify=observe,
+            )
+
+    assert held, "no locks observed; the probe did not run inside the transaction"
+    blocking = [(table, mode) for table, mode in held if mode in blocking_modes]
+    assert not blocking, f"the load blocks readers on: {blocking}"
+
+
+def test_single_season_load_removes_every_other_season(valid_root: Path, client) -> None:
+    """TRUNCATE guaranteed this structurally; ordered DELETE must do so explicitly."""
+    del client
+    import psycopg
+
+    from db.config import get_db_config
+
+    lifecycle.generate_manifest(valid_root, SEASON)
+    dataset = lifecycle.verify_manifest(valid_root, SEASON)
+    config = get_db_config()
+
+    with psycopg.connect(**config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM games WHERE season <> %s", (SEASON,))
+            assert cur.fetchone()[0] > 0, "fixture should hold another season to displace"
+
+        lifecycle.replace_season(conn, dataset, single_season=True, acquire_advisory_lock=False)
+
+        with conn.cursor() as cur:
+            for table in ("games", "team_game_stats", "player_game_stats", "shot_attempts"):
+                cur.execute(f"SELECT COUNT(*) FROM {table} WHERE season <> %s", (SEASON,))
+                assert cur.fetchone()[0] == 0, f"{table} still holds another season"
+            cur.execute("SELECT COUNT(*) FROM seasons WHERE id <> %s", (SEASON,))
+            assert cur.fetchone()[0] == 0, "seasons still holds another season"
+        conn.rollback()

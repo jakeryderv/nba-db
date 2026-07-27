@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import psycopg
 import requests  # type: ignore[import-untyped, unused-ignore]
+from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from db.config import get_db_config
@@ -1020,10 +1021,28 @@ def replace_season(
                 _rows(dataset.players, PLAYER_COLUMNS),
             )
             if single_season:
-                cur.execute(
-                    "TRUNCATE shot_attempts, player_game_stats, team_game_stats, "
-                    "games, seasons RESTART IDENTITY"
-                )
+                # DELETE rather than TRUNCATE. TRUNCATE takes ACCESS EXCLUSIVE
+                # and holds it until commit, so every reader blocked for the
+                # length of the load. DELETE takes ROW EXCLUSIVE, so readers
+                # continue to see the previous season until this transaction
+                # commits.
+                #
+                # The order is load-bearing: rows must leave referencing tables
+                # before the tables they reference, or the foreign keys reject
+                # the delete. The multi-season branch below deletes in the same
+                # order for the same reason.
+                #
+                # RESTART IDENTITY is gone with the TRUNCATE and is not missed:
+                # migration 10 dropped the last surrogate key, so the database
+                # holds no sequences for it to reset.
+                for table in (
+                    "shot_attempts",
+                    "player_game_stats",
+                    "team_game_stats",
+                    "games",
+                    "seasons",
+                ):
+                    cur.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(table)))
                 cur.execute(
                     "DELETE FROM players WHERE NOT (id = ANY(%s))",
                     (dataset.players["id"].astype(int).tolist(),),

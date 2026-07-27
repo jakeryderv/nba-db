@@ -32,21 +32,39 @@ so they must run after any rename.
 
 ## Decisions
 
-### Load into new tables, swap by rename
+### Ordered DELETE instead of TRUNCATE
 
-Build `<table>__incoming` alongside the live tables, copy into those, then rename inside
-the same transaction: live to `__previous`, incoming to live, and drop `__previous`.
-PostgreSQL takes `ACCESS EXCLUSIVE` for the rename, but holds it for a catalog update
-rather than for the copy.
+**This reverses the approach first proposed here.** The original plan was to build
+`<table>__incoming` tables and swap by rename. Implementation showed that is far more
+costly than it looked, and that a much smaller change satisfies the same invariant.
 
-This keeps every property the current approach has. The rename is transactional, so a
-failure anywhere rolls back to the original tables. The advisory lock still serializes
-concurrent replacements. And atomicity is unchanged — a reader sees either the old
-contents or the new, never a mixture.
+`TRUNCATE` takes `ACCESS EXCLUSIVE` and holds it to commit, which is the outage.
+`DELETE` takes `ROW EXCLUSIVE`, so readers continue against the previous contents until
+the commit — the property the spec requires.
 
-*Alternative considered:* `DELETE` instead of `TRUNCATE`, which takes only `ROW
-EXCLUSIVE`. It avoids the outage but leaves the table bloated by a full season of dead
-tuples and is far slower. Rejected.
+Three findings drove the reversal:
+
+- **The foreign-key graph makes a rename-swap expensive.** There are fourteen foreign
+  keys, and every season table references `games`. Constraints bind by OID, so renaming
+  `games` leaves every inbound key pointing at the old table. A correct swap means
+  building five incoming tables and recreating and validating all fourteen keys.
+- **`CREATE TABLE ... (LIKE x INCLUDING ALL)` does not copy foreign keys.** They would
+  have to be enumerated in load code or rebuilt from the catalog at run time, so every
+  future migration would need to stay in step with the loader. That is a permanent
+  divergence hazard in the one function with the least room for error.
+- **`TRUNCATE`'s remaining advantage is now nil.** Its only edge over `DELETE` here was
+  `RESTART IDENTITY`, and migration 10 dropped the last surrogate key, leaving zero
+  sequences in the database.
+
+The original rejection of `DELETE` cited bloat and speed. Both are real and neither is
+material: this runs once or twice a season, under an operator, on 219k rows, and
+autovacuum reclaims the dead tuples. Paying permanent structural complexity to avoid a
+transient and self-correcting cost is the wrong trade.
+
+The ordering is not incidental. Rows must be removed from referencing tables before
+their targets, or the delete fails the foreign keys. The multi-season branch of this same
+function already deletes in that order, so this adopts an established pattern rather than
+inventing one.
 
 ### Verification runs after the swap
 
