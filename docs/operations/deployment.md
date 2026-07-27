@@ -16,6 +16,15 @@ Schema migration files are immutable after they have been applied. To change the
 The Railway project runs `production` and `staging`. Both `nba-api` services deploy from
 `main`, so a merge reaches them within the same second.
 
+**A merge is not confirmed live until the release observer passes.** Railway has twice
+marked a `main` deployment `SKIPPED` and gone on serving the previous revision, with no
+failed deploy and nothing in its UI presenting as an error — see
+[#64](https://github.com/jakeryderv/nba-db/issues/64). Both times the deployment record
+was missing the service manifest that carries `/ready`, and both recovered on a manual
+`railway redeploy --service nba-api --environment production --from-source`. The observer
+below is the only thing that detects this, so do not treat a green CI run on `main` as
+evidence that production changed.
+
 **Staging is a rehearsal target for data, not a gate for code.** Its job is
 `make season-stage`. A promotion refuses any dataset staging is not already serving, so
 staging holds the only rehearsal standing between a manifested season and production —
