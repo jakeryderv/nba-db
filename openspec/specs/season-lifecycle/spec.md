@@ -102,6 +102,16 @@ replacements SHALL be serialized by an advisory lock; for staging and
 production the lock SHALL be held across backup, replacement, and live
 verification as one operation.
 
+A replacement SHALL NOT render the database unreadable for the duration of the
+load. No lock that blocks readers SHALL be held while the new contents are copied
+in.
+
+Atomicity and availability are separate properties, and satisfying the first says
+nothing about the second. `TRUNCATE` is atomic and takes ACCESS EXCLUSIVE for the
+remainder of the transaction, so every reader blocks for as long as the copy takes.
+Ordered unqualified `DELETE`s are equally atomic, take only ROW EXCLUSIVE, and leave
+readers seeing the previous contents until the transaction commits.
+
 Before the transaction commits, the replacement SHALL verify against the
 database it just wrote: per-table row counts SHALL match the manifest, the
 recorded season metadata SHALL match the validated dataset, and referential
@@ -109,6 +119,9 @@ consistency between games and their team and player lines SHALL hold. Under the
 single-season posture it SHALL additionally confirm that no other season
 remains in any table and that no stale shared team or player rows survive. Any
 failure SHALL abort the transaction, leaving the previous contents intact.
+
+Verification SHALL observe the data as it will be served. It runs inside the
+replacement transaction, against the tables under the names callers use.
 
 #### Scenario: Count mismatch rolls back
 
@@ -119,6 +132,16 @@ failure SHALL abort the transaction, leaving the previous contents intact.
 
 - **WHEN** a single-season replacement would leave rows from another season
 - **THEN** the transaction aborts
+
+#### Scenario: Readers are not blocked for the length of the load
+
+- **WHEN** a season is loaded into a database that is serving reads
+- **THEN** reads continue against the previous contents until the transaction commits, rather than blocking for the duration of the copy
+
+#### Scenario: Verification reads the served tables
+
+- **WHEN** the replacement verifies its work before committing
+- **THEN** it queries the tables under the names callers use
 
 ### Requirement: Staging and promotion verify the live deployment against the manifest
 
