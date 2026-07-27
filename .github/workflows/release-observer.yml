@@ -73,16 +73,22 @@ jobs:
         run: |
           healthy=false
           reason="CI concluded $CI_CONCLUSION"
+          # Only the unserved-revision branch is recoverable by redeploying. A failed
+          # product contract means the revision did deploy and is serving the wrong
+          # data, so redeploying it would ship the same wrong thing again.
+          recovery=""
           if [ "$CI_CONCLUSION" = "success" ] && [ "$RELEASE_OUTCOME" = "success" ] && [ "$LIVE_OUTCOME" = "success" ]; then
             healthy=true
             reason="CI, Railway release revision, and live product contract passed"
           elif [ "$CI_CONCLUSION" = "success" ] && [ "$RELEASE_OUTCOME" != "success" ]; then
             reason="Railway did not serve the expected revision within ten minutes"
+            recovery="Railway intermittently marks a main deployment SKIPPED and keeps serving the previous revision with no error of its own (#64). Confirm with \`railway deployment list --service nba-api --environment production\`, then recover with \`railway redeploy --service nba-api --environment production --from-source\`."
           elif [ "$CI_CONCLUSION" = "success" ]; then
             reason="The deployed product contract failed"
           fi
           echo "healthy=$healthy" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "recovery=$recovery" >> "$GITHUB_OUTPUT"
 
       # These two steps stay inline rather than using .github/actions/reconcile-alert
       # like the maintenance workflow does. A repo-local composite action requires a
@@ -114,6 +120,7 @@ jobs:
           # itself on a CI failure, the case it most exists to report.
           GH_REPO: ${{ github.repository }}
           REASON: ${{ steps.state.outputs.reason }}
+          RECOVERY: ${{ steps.state.outputs.recovery }}
           ALERT_TITLE: Production release requires attention
         run: |
           gh label create production-alert --color D73A4A \
@@ -122,12 +129,18 @@ jobs:
             --json number,title \
             --jq 'map(select(.title == env.ALERT_TITLE)) | .[0].number // empty')"
           source_url="${{ github.event.workflow_run.html_url }}"
+          body="$REASON. Source run: $source_url"
+          if [ -n "$RECOVERY" ]; then
+            body="$body
+
+          $RECOVERY"
+          fi
           if [ -n "$issue_number" ]; then
-            gh issue comment "$issue_number" --body "$REASON. Source run: $source_url"
+            gh issue comment "$issue_number" --body "$body"
           else
             gh issue create --title "$ALERT_TITLE" \
               --label production-alert \
-              --body "$REASON. Source run: $source_url"
+              --body "$body"
           fi
 
       - name: Fail unhealthy release observation

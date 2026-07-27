@@ -28,6 +28,10 @@ that are not inferable from the code.
 - No AI attribution or `Co-Authored-By` lines in commit messages.
 - Merging to `main` deploys to production: Railway picks up the commit, gated by the
   `/ready` healthcheck, and the release observer verifies the live contract afterward.
+  Treat a merge as unconfirmed until the observer passes. Railway intermittently marks a
+  `main` deployment SKIPPED and keeps serving the previous revision with no error of its
+  own, so the observer is the only signal that a merge actually shipped; recovery is
+  `railway redeploy --service nba-api --environment production --from-source`. See #64.
   Staging deploys from `main` too and does not gate code — there is no staging step to
   take before a merge. It rehearses data promotion only; see `docs/operations/deployment.md`.
 

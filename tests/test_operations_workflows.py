@@ -85,6 +85,24 @@ def test_alerting_steps_can_reach_the_repository_without_a_checkout() -> None:
     assert "GH_REPO: ${{ github.repository }}" in RECONCILE_ACTION.read_text()
 
 
+def test_release_observer_alert_names_its_recovery() -> None:
+    """An unserved revision is recoverable in one command; the alert must carry it.
+
+    Railway intermittently marks a main deployment SKIPPED and serves the previous
+    revision with no error anywhere (#64). The observer is the only detection, so
+    leaving the operator to rediscover `railway redeploy` is the slow part of the
+    recovery, not the diagnosis.
+    """
+    observer = (ROOT / ".github/workflows/release-observer.yml").read_text()
+
+    assert "railway redeploy" in observer
+    assert "--from-source" in observer
+    # Empty by default: redeploying does not fix a failed product contract, so the
+    # guidance attaches to the unserved-revision branch alone rather than to every
+    # unhealthy observation.
+    assert 'recovery=""' in observer
+
+
 def test_release_observer_does_not_depend_on_the_repo_local_action() -> None:
     """Its checkout is conditional, so a repo-local action would silence it.
 
