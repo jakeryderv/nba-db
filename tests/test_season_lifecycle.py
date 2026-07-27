@@ -15,7 +15,7 @@ import pytest
 from db.config import get_db_config
 from etl import extract, official_verification, transform
 from etl import season_lifecycle as lifecycle
-from tests.conftest import CELTICS, LAKERS
+from tests.conftest import CELTICS, LAKERS, SEED_SEASON
 
 SEASON = "2025-26"
 GAME_ID = "0022500001"
@@ -1005,6 +1005,7 @@ def test_promotion_main_holds_lock_across_backup_replace_and_smoke(
     monkeypatch.setattr(lifecycle, "promotion_operation_lock", locked)
     monkeypatch.setattr(lifecycle, "create_backup", lambda *_args: events.append("backup"))
     monkeypatch.setattr(lifecycle.psycopg, "connect", lambda **_config: ReplacementConnection())
+    monkeypatch.setattr(lifecycle, "apply_schema", lambda *_args: events.append("migrate"))
     monkeypatch.setattr(
         lifecycle,
         "replace_season",
@@ -1043,6 +1044,9 @@ def test_promotion_main_holds_lock_across_backup_replace_and_smoke(
         "lock",
         "backup",
         "replacement-connect",
+        # Migrations apply after the backup and before the write, so the backup
+        # reflects the pre-change schema and the write lands on the new one.
+        "migrate",
         "replace",
         "replacement-close",
         "smoke",
@@ -1348,3 +1352,192 @@ def test_promotion_requires_the_season_to_be_staged_first() -> None:
         )
 
     verify_staged("https://staging.example.com", dataset, get=staged)
+
+
+def test_promotion_applies_pending_migrations_before_replacing(
+    valid_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """load-local and stage both applied migrations; promote did not.
+
+    Adding a numbered migration would therefore make promotion take a backup and
+    then abort partway through the replacement -- failing closed, but for a
+    reason nobody would guess, in the path with the least room to improvise.
+    """
+    lifecycle.generate_manifest(valid_root, SEASON)
+    events: list[str] = []
+
+    @contextmanager
+    def locked(_config):
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    class ReplacementConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    monkeypatch.setattr(lifecycle, "production_db_config", lambda *_args: {"host": "remote"})
+    monkeypatch.setattr(lifecycle, "promotion_operation_lock", locked)
+    monkeypatch.setattr(lifecycle, "create_backup", lambda *_args: events.append("backup"))
+    monkeypatch.setattr(lifecycle.psycopg, "connect", lambda **_config: ReplacementConnection())
+    monkeypatch.setattr(lifecycle, "apply_schema", lambda *_args: events.append("migrate"))
+    monkeypatch.setattr(
+        lifecycle, "replace_season", lambda *_args, **_kwargs: events.append("replace")
+    )
+    monkeypatch.setattr(lifecycle, "verify_live_api", lambda *_args: events.append("smoke"))
+    monkeypatch.setattr(lifecycle, "verify_staged", lambda *_args: events.append("staged"))
+
+    result = lifecycle.main(
+        [
+            "--clean-root",
+            str(valid_root),
+            "promote",
+            "--season",
+            SEASON,
+            "--target",
+            "production",
+            "--confirm-season",
+            SEASON,
+            "--confirm-single-season",
+            "DELETE OTHER SEASONS",
+            "--backup-file",
+            str(tmp_path / "backup.dump"),
+            "--staging-api-url",
+            "https://staging.example.com",
+            "--api-url",
+            "https://api.example.com",
+        ]
+    )
+
+    assert result == 0
+    assert "migrate" in events, "promotion did not apply pending migrations"
+    # After the backup, so the backup reflects the pre-change schema; before the
+    # replacement, so the write lands on the migrated schema.
+    assert events.index("backup") < events.index("migrate") < events.index("replace")
+    # Inside the operation lock, so nothing can interleave.
+    assert events.index("lock") < events.index("migrate")
+
+
+def test_replace_season_rolls_back_when_verification_fails(valid_root: Path, client) -> None:
+    """A dataset that fails its own checks must never become visible.
+
+    Uses a real database rather than a stubbed connection: the assertion is that
+    PostgreSQL rolls the transaction back, which a fake transaction object would
+    only be asserting about itself. `single_season=True` truncates, so if the
+    rollback does not happen the seeded rows are gone -- which is precisely the
+    failure being guarded against.
+    """
+    del client
+    import psycopg
+
+    from db.config import get_db_config
+
+    lifecycle.generate_manifest(valid_root, SEASON)
+    dataset = lifecycle.verify_manifest(valid_root, SEASON)
+
+    config = get_db_config()
+    with psycopg.connect(**config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM games WHERE season = %s", (SEED_SEASON,))
+            before = cur.fetchone()[0]
+        assert before > 0, "fixture should have seeded games to protect"
+
+        def failing_verifier(_connection):
+            raise lifecycle.PromotionSafetyError("counts disagree")
+
+        with pytest.raises(lifecycle.PromotionSafetyError, match="counts disagree"):
+            lifecycle.replace_season(
+                conn,
+                dataset,
+                single_season=True,
+                acquire_advisory_lock=False,
+                verify=failing_verifier,
+            )
+
+    with psycopg.connect(**config) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM games WHERE season = %s", (SEED_SEASON,))
+        after = cur.fetchone()[0]
+    assert after == before, "the failed verification did not roll back the replacement"
+
+
+def test_post_commit_smoke_failure_names_the_backup_and_the_procedure(
+    valid_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one thing an operator needs at that moment is which backup to restore.
+
+    A bare re-raise loses it, and the operator is meeting this failure for the
+    first time under pressure.
+    """
+    lifecycle.generate_manifest(valid_root, SEASON)
+    backup_file = tmp_path / "promotion-backup.dump"
+
+    @contextmanager
+    def locked(_config):
+        yield
+
+    class ReplacementConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    def failing_smoke(*_args):
+        raise lifecycle.PromotionSafetyError("Live API smoke verification failed")
+
+    monkeypatch.setattr(lifecycle, "production_db_config", lambda *_args: {"host": "remote"})
+    monkeypatch.setattr(lifecycle, "promotion_operation_lock", locked)
+    monkeypatch.setattr(lifecycle, "create_backup", lambda *_args: None)
+    monkeypatch.setattr(lifecycle.psycopg, "connect", lambda **_config: ReplacementConnection())
+    monkeypatch.setattr(lifecycle, "apply_schema", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "replace_season", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "verify_staged", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "verify_live_api", failing_smoke)
+
+    printed: list[str] = []
+    monkeypatch.setattr(
+        "sys.stderr", type("W", (), {"write": lambda _s, text: printed.append(text)})()
+    )
+
+    result = lifecycle.main(
+        [
+            "--clean-root",
+            str(valid_root),
+            "promote",
+            "--season",
+            SEASON,
+            "--target",
+            "production",
+            "--confirm-season",
+            SEASON,
+            "--confirm-single-season",
+            "DELETE OTHER SEASONS",
+            "--backup-file",
+            str(backup_file),
+            "--staging-api-url",
+            "https://staging.example.com",
+            "--api-url",
+            "https://api.example.com",
+        ]
+    )
+
+    assert result == 2
+    message = "".join(printed)
+    assert str(backup_file) in message, "failure did not name the backup to restore from"
+    assert "season-lifecycle.md#recovering-from-a-failed-promotion" in message
+    # Pre-commit verification passed, so this is a deployment fault. Saying so
+    # keeps an operator from restoring a database to fix a wedged deploy.
+    assert "deployment fault rather than a data fault" in message
+
+
+def test_staging_also_verifies_before_committing() -> None:
+    """Catching a broken dataset at staging costs nothing; catching it at
+    promotion costs a backup, a lock, and an operator's confidence."""
+    import inspect
+
+    source = inspect.getsource(lifecycle.main)
+    stage_branch = source.split('if args.command == "stage":')[1].split("if args.confirm")[0]
+    assert "verify=" in stage_branch, "stage does not run pre-commit verification"

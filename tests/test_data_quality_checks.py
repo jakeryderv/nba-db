@@ -9,17 +9,13 @@ import psycopg
 import pytest
 
 from db.config import get_db_config
-from db.tests.test_data_quality import (
-    test_game_scores_match_team_stats as check_game_scores_match_team_stats,
+from db.quality_checks import (
+    check_game_scores_match_team_stats,
+    check_recorded_game_count_reconciles,
+    check_shot_totals_match_player_game_stats,
 )
-from db.tests.test_data_quality import (
-    test_natural_keys_are_enforced_by_constraints as check_natural_keys_enforced,
-)
-from db.tests.test_data_quality import (
-    test_recorded_game_count_reconciles as check_recorded_game_count_reconciles,
-)
-from db.tests.test_data_quality import (
-    test_shot_totals_match_player_game_stats as check_shot_totals_match_player_game_stats,
+from db.quality_checks import (
+    check_natural_keys_are_enforced_by_constraints as check_natural_keys_enforced,
 )
 from tests.conftest import CELTICS, LEBRON, SEED_SEASON
 
@@ -106,3 +102,31 @@ def test_provenance_check_detects_a_count_that_stopped_reconciling(client):
     finally:
         conn.rollback()
         conn.close()
+
+
+def test_every_check_is_exposed_as_a_test() -> None:
+    """The pytest surface must not silently lose a check.
+
+    `db/tests/test_data_quality.py` is aliased imports plus an `__all__` literal.
+    Without that literal the linter reads the imports as unused and removes them,
+    which deletes the entire suite while leaving a green run -- observed once
+    while building this. Assert the two stay in step.
+    """
+    import db.tests.test_data_quality as surface
+    from db.quality_checks import all_checks
+
+    expected = {name.replace("check_", "test_", 1) for name, _ in all_checks()}
+    exposed = {name for name in vars(surface) if name.startswith("test_")}
+
+    assert expected == exposed, (
+        f"pytest surface drifted from db.quality_checks: {expected ^ exposed}"
+    )
+
+
+def test_the_runner_covers_every_check() -> None:
+    """A check that exists but never runs is the failure this area keeps producing."""
+    import db.quality_checks as module
+    from db.quality_checks import all_checks
+
+    defined = {name for name in vars(module) if name.startswith("check_")}
+    assert {name for name, _ in all_checks()} == defined

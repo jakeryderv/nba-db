@@ -126,6 +126,46 @@ The staging command refuses local routes and refuses to run when staging and pro
 the same. It applies migrations, replaces staging with the manifested season, and runs the same live
 API smoke suite. Smoke requests force cache revalidation.
 
+## Recovering from a failed promotion
+
+A promotion can fail in two places, and they need opposite responses.
+
+**Before the commit.** Verification of the replacement data now runs inside the
+replacement transaction, so a dataset that fails its counts or its data-quality checks
+rolls back. Production still holds the previous season and **no recovery is required**.
+The error names the failing checks; fix the dataset and promote again.
+
+**After the commit.** Only live verification runs after the commit, because the serving
+application reads through its own connections and cannot observe an uncommitted
+transaction. Reaching this point means the data passed its checks and the *deployment*
+is wrong — a wedged release, an unhealthy instance, or an edge fault. The command reports
+the backup path and points here.
+
+Recovery is deliberately not automatic. Restoring a database does not fix a wedged
+deployment, and a restore is the most destructive action available. Diagnose first:
+
+```bash
+# 1. Is the origin serving at all, and which revision?
+curl -sS -D- -o /dev/null -H 'Cache-Control: no-cache' "$LIVE_API_URL/ready"
+
+# 2. Does the database itself hold what was promoted?
+make live-check API_URL="$LIVE_API_URL"
+
+# 3. Check the deployment, not the data.
+railway deployment list --service nba-api --environment production --json
+```
+
+If `/ready` reports the promoted season with matching counts, the data is fine and this
+is a deployment problem — redeploy rather than restore.
+
+Only if the database genuinely holds wrong data should a restore be considered. Rehearse
+it first with the drill below, against a `_recovery` database, never against production.
+
+**One ordering detail that matters.** The backup is taken *before* any migration this
+promotion applies. Restoring it therefore restores the prior schema, and
+`scripts/init_db.py` must run afterwards to re-apply pending migrations — which the
+application does on every boot, so a normal restart covers it.
+
 ## Backup restore guidance
 
 Keep the reported backup path and restrict access to it. Run the executable restore drill against a
