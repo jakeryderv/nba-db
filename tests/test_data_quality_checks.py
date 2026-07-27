@@ -75,9 +75,9 @@ def test_natural_key_check_detects_a_dropped_constraint(client):
     conn = _connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "ALTER TABLE player_game_stats DROP CONSTRAINT player_game_stats_game_id_player_id_key"
-            )
+            # Migration 10 promoted this natural key from a unique constraint
+            # to the primary key, so the constraint to drop is the pkey.
+            cur.execute("ALTER TABLE player_game_stats DROP CONSTRAINT player_game_stats_pkey")
 
         with pytest.raises(AssertionError, match="no longer enforced"):
             check_natural_keys_enforced(conn)

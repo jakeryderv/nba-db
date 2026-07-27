@@ -159,6 +159,11 @@ def transform_games(season):
     games = []
     seen = set()
 
+    # Group once instead of rescanning the whole frame per game. The previous
+    # form filtered `df` inside the loop, so assembling n games cost O(n^2)
+    # passes over every row in the log.
+    rows_by_game = dict(df.groupby("GAME_ID", sort=False))
+
     for _, row in df.iterrows():
         game_id = row["GAME_ID"]
         if game_id in seen:
@@ -178,7 +183,7 @@ def transform_games(season):
             home_team = matchup.split(" @ ")[1]
 
         # Get scores from both rows for this game
-        game_rows = df[df["GAME_ID"] == game_id]
+        game_rows = rows_by_game[game_id]
         home_row = game_rows[game_rows["TEAM_ABBREVIATION"] == home_team].iloc[0]
         away_row = game_rows[game_rows["TEAM_ABBREVIATION"] == away_team].iloc[0]
 

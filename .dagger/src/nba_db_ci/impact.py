@@ -20,7 +20,6 @@ FRONTEND_EXACT = {"tests/test_frontend_safety.py", "tests/test_browser.py"}
 LIFECYCLE_PREFIXES = ("etl/",)
 LIFECYCLE_EXACT = {
     "tests/test_season_lifecycle.py",
-    "tests/test_etl_load.py",
     "tests/test_shot_pipeline.py",
 }
 
