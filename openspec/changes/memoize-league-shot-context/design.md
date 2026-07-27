@@ -71,6 +71,21 @@ At the cap the memo evicts the least-recently-used entry and recomputes on the n
 miss. That is the correct degradation *for a cache* — unlike the limiter, failing toward
 "do the work" costs latency and nothing else.
 
+### The computation runs outside the lock
+
+This is where the memo must *not* copy the limiter. The limiter holds its lock across
+its whole operation because that operation is a few list manipulations. Here the
+computation is a whole-season aggregate taking tens of milliseconds, and holding the
+lock across it would serialize every shot-chart request behind one database round trip —
+strictly worse than the repeated work being removed, and a far harder problem to
+diagnose because it would only appear under concurrency.
+
+So the lock is taken twice: once to read, once to insert and evict. The cost is that
+concurrent cold misses on the same key may each compute it, wasting work without
+producing a wrong answer. Single-flight de-duplication would remove that waste but adds
+per-key wait machinery for a case that occurs only on a cold process at the exact moment
+two requests race — not worth the complexity here.
+
 ### Read `loaded_at` on the cursor the handler already holds
 
 One indexed single-row read against `seasons`, issued inside the existing cursor block.
