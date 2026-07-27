@@ -8,12 +8,12 @@
 
 ## 2. Migration 10
 
-- [ ] 2.1 Add a failing test asserting `games.game_date` is NOT NULL, both game foreign keys are indexed, and the surrogate `id` columns are gone.
-- [ ] 2.2 Write `db/schema/10_*.sql` as the next append-only file: `game_date` NOT NULL, indexes on `home_team_id` and `away_team_id`, drop the two `SERIAL` surrogate keys and promote the existing unique constraints to primary keys.
-- [ ] 2.3 Rewrite `vw_team_standings` as a `UNION ALL` of home and away legs so the join can use an index, and assert it returns the same rows as before for the seeded fixture.
-- [ ] 2.4 Drop the `ORDER BY` clauses from the four views whose callers discard them.
-- [ ] 2.5 Confirm the natural-key data-quality check still passes, now that these are primary rather than unique constraints.
-- [ ] 2.6 Confirm the migration applies cleanly on top of an existing loaded database, not only on a fresh one.
+- [x] 2.1 Add a failing test asserting `games.game_date` is NOT NULL, both game foreign keys are indexed, and the surrogate `id` columns are gone.
+- [x] 2.2 Write `db/schema/10_*.sql` as the next append-only file: `game_date` NOT NULL, indexes on `home_team_id` and `away_team_id`, drop the two `SERIAL` surrogate keys and promote the existing unique constraints to primary keys.
+- [x] 2.3 Rewrite `vw_team_standings` as a `UNION ALL` of home and away legs so the join can use an index, and assert it returns the same rows as before for the seeded fixture.
+- [x] 2.4 Drop the `ORDER BY` clauses from the four views whose callers discard them.
+- [x] 2.5 Confirm the natural-key data-quality check still passes, now that these are primary rather than unique constraints.
+- [x] 2.6 Confirm the migration applies cleanly on top of an existing loaded database, not only on a fresh one.
 
 ## 3. Load and swap
 

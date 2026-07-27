@@ -187,13 +187,26 @@ def apply_schema(conn: psycopg.Connection) -> None:
     print("Schema is up to date.")
 
 
-def ensure_readonly_role(conn: psycopg.Connection) -> None:
-    """Create/refresh the SELECT-only role the web app connects as."""
-    password = os.getenv("READONLY_DB_PASSWORD")
+def ensure_readonly_role(
+    conn: psycopg.Connection,
+    *,
+    role: str | None = None,
+    password: str | None = None,
+) -> None:
+    """Create/refresh the SELECT-only role the web app connects as.
+
+    Credentials may be passed explicitly instead of read from the environment.
+    Roles are cluster-scoped, so a caller that needs a differently-named role --
+    a restore drill, which must not disturb the real one -- would otherwise have
+    to mutate process-wide environment to say so. Anything that builds a
+    connection pool while that mutation is in effect captures those credentials
+    for the life of the pool, long after the environment is restored.
+    """
+    password = password if password is not None else os.getenv("READONLY_DB_PASSWORD")
     if not password:
         print("READONLY_DB_PASSWORD not set, skipping read-only role setup.")
         return
-    role_name = os.getenv("READONLY_DB_USER", "nba_readonly")
+    role_name = role if role is not None else os.getenv("READONLY_DB_USER", "nba_readonly")
 
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role_name,))

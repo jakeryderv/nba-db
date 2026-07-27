@@ -25,6 +25,8 @@ from app.readiness import evaluate_readiness  # noqa: E402
 from nba_config import DEFAULT_SEASON  # noqa: E402
 from scripts.init_db import apply_schema, ensure_readonly_role  # noqa: E402
 
+DEFAULT_READONLY_ROLE = "nba_readonly"
+
 
 class RestoreDrillError(RuntimeError):
     """Raised when a restore drill is unsafe or the restored data is invalid."""
@@ -119,7 +121,9 @@ def verify_restored_database(
     return {"games": games, "players": players, "shot_attempts": shots}
 
 
-def prepare_restored_database(config: dict[str, Any]) -> None:
+def prepare_restored_database(
+    config: dict[str, Any], *, readonly_role: str, readonly_password: str
+) -> None:
     """Run the same boot path production runs, against the restored database.
 
     railway.toml's startCommand runs init_db on every boot, so this is what
@@ -128,14 +132,17 @@ def prepare_restored_database(config: dict[str, Any]) -> None:
     A drill that skips it proves the data arrived, not that the database can be
     brought up.
     """
-    if not os.getenv("READONLY_DB_PASSWORD"):
+    if not readonly_password:
         raise RestoreDrillError(
-            "READONLY_DB_PASSWORD must be set so the drill can prove the "
+            "A read-only password is required so the drill can prove the "
             "least-privilege role is recreated on the restored database"
         )
     with psycopg.connect(**config) as conn:
         apply_schema(conn)
-        ensure_readonly_role(conn)
+        # Passed explicitly rather than through the environment: a pool built
+        # anywhere in this process while such an override were set would capture
+        # these credentials permanently, and this role is disposable.
+        ensure_readonly_role(conn, role=readonly_role, password=readonly_password)
 
 
 def verify_restored_data_quality(
@@ -173,7 +180,9 @@ def verify_restored_data_quality(
         raise RestoreDrillError(f"Restored data failed quality checks:\n{tail}")
 
 
-def verify_restored_database_can_serve(config: dict[str, Any], season: str) -> dict[str, Any]:
+def verify_restored_database_can_serve(
+    config: dict[str, Any], season: str, *, readonly_role: str, readonly_password: str
+) -> dict[str, Any]:
     """Assert the readiness contract against the restored database as the app's role.
 
     Evaluating readiness through nba_readonly proves two things at once: that the
@@ -181,12 +190,7 @@ def verify_restored_database_can_serve(config: dict[str, Any], season: str) -> d
     and that the least-privilege role the app actually connects as can read it.
     Checking as the superuser would prove neither.
     """
-    role = os.getenv("READONLY_DB_USER", "nba_readonly")
-    readonly_config = {
-        **config,
-        "user": role,
-        "password": os.environ["READONLY_DB_PASSWORD"],
-    }
+    readonly_config = {**config, "user": readonly_role, "password": readonly_password}
     with psycopg.connect(**readonly_config, row_factory=dict_row) as conn, conn.cursor() as cur:
         payload = evaluate_readiness(cur, season)
     if payload is None:
@@ -205,6 +209,8 @@ def run_restore_drill(
     expected_manifest_sha256: str | None = None,
     prove_servable: bool = True,
     check_data_quality: bool = True,
+    readonly_role: str = DEFAULT_READONLY_ROLE,
+    readonly_password: str = "",
     runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
     if not backup_file.is_file() or backup_file.is_symlink():
@@ -258,8 +264,12 @@ def run_restore_drill(
         )
         report: dict[str, Any] = {**counts, "manifest_sha256": expected_manifest_sha256}
         if prove_servable:
-            prepare_restored_database(config)
-            report["readiness"] = verify_restored_database_can_serve(config, season)
+            prepare_restored_database(
+                config, readonly_role=readonly_role, readonly_password=readonly_password
+            )
+            report["readiness"] = verify_restored_database_can_serve(
+                config, season, readonly_role=readonly_role, readonly_password=readonly_password
+            )
         if check_data_quality:
             # Runs before the finally-block drop: the checks need the database
             # the drill is about to dispose of.
@@ -305,6 +315,8 @@ def main() -> None:
             args.season,
             expected_manifest_sha256=args.manifest_sha256,
             check_data_quality=not args.skip_data_quality,
+            readonly_role=os.getenv("READONLY_DB_USER", DEFAULT_READONLY_ROLE),
+            readonly_password=os.getenv("READONLY_DB_PASSWORD", ""),
         )
     except RestoreDrillError as exc:
         parser.exit(2, f"ERROR: {exc}\n")

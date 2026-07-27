@@ -130,7 +130,7 @@ def test_restore_omits_environment_specific_owners_and_acls(monkeypatch, tmp_pat
     shutil.which("pg_dump") is None or shutil.which("pg_restore") is None,
     reason="PostgreSQL client tools are not installed",
 )
-def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path, monkeypatch) -> None:
+def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path) -> None:
     import psycopg
 
     from app.db import get_cursor
@@ -139,11 +139,16 @@ def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path, monk
     config = get_db_config()
     recovery = {**config, "dbname": "nba_db_test_recovery"}
     backup = tmp_path / "nba-db-test.dump"
-    # Roles are cluster-scoped, not per-database, so the drill's role setup would
-    # otherwise reset the password of a real nba_readonly on this machine.
+    # Roles are cluster-scoped, not per-database, so the drill uses a disposable
+    # name rather than resetting a real nba_readonly on this machine.
+    #
+    # Passed as arguments, never through os.environ. Setting READONLY_DB_* here
+    # would make get_db_config resolve readonly credentials, and any pool built
+    # in this process while that held would cache them permanently -- surviving
+    # monkeypatch teardown and breaking every later test once this test drops
+    # the role.
     drill_role = "nba_readonly_drill_test"
-    monkeypatch.setenv("READONLY_DB_USER", drill_role)
-    monkeypatch.setenv("READONLY_DB_PASSWORD", "drill-test-password")
+    drill_password = "drill-test-password"
     with get_cursor() as cur:
         cur.execute(
             """
@@ -160,7 +165,13 @@ def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path, monk
         # checks correctly reject it; they are exercised against real data by the
         # scheduled drill instead.
         report = run_restore_drill(
-            backup, recovery, SEED_SEASON, expected_manifest_sha256=DIGEST, check_data_quality=False
+            backup,
+            recovery,
+            SEED_SEASON,
+            expected_manifest_sha256=DIGEST,
+            check_data_quality=False,
+            readonly_role=drill_role,
+            readonly_password=drill_password,
         )
         assert report["games"] == 10
         assert report["players"] == 3
@@ -189,9 +200,7 @@ def test_real_backup_can_be_restored_verified_and_removed(client, tmp_path, monk
     shutil.which("pg_dump") is None or shutil.which("pg_restore") is None,
     reason="PostgreSQL client tools are not installed",
 )
-def test_restore_drill_rejects_a_backup_from_a_different_dataset(
-    client, tmp_path, monkeypatch
-) -> None:
+def test_restore_drill_rejects_a_backup_from_a_different_dataset(client, tmp_path) -> None:
     """A dump whose manifest disagrees with production must not pass the drill."""
     from app.db import get_cursor
 
@@ -199,7 +208,6 @@ def test_restore_drill_rejects_a_backup_from_a_different_dataset(
     config = get_db_config()
     recovery = {**config, "dbname": "nba_db_test_recovery"}
     backup = tmp_path / "nba-db-mismatch.dump"
-    monkeypatch.setenv("READONLY_DB_PASSWORD", "drill-test-password")
     with get_cursor() as cur:
         cur.execute(
             """
@@ -219,6 +227,7 @@ def test_restore_drill_rejects_a_backup_from_a_different_dataset(
                 SEED_SEASON,
                 expected_manifest_sha256=OTHER_DIGEST,
                 check_data_quality=False,
+                readonly_password="drill-test-password",
             )
     finally:
         with get_cursor() as cur:
@@ -279,3 +288,37 @@ def test_data_quality_runs_against_the_restored_database_not_the_ambient_one() -
     assert "nba_db_recovery" in captured["env"]["DATABASE_URL"]
     assert captured["env"]["DATA_QUALITY_SEASON"] == "2025-26"
     assert any("db/tests" in str(part) for part in captured["command"])
+
+
+def test_the_drill_does_not_reach_for_readonly_credentials_in_the_environment() -> None:
+    """Drill credentials must be arguments, not process-wide state.
+
+    A pool built anywhere in the process while READONLY_DB_USER/PASSWORD are
+    temporarily set captures those credentials in its conninfo for the pool's
+    lifetime. Restoring the environment does not undo that, so once the drill
+    drops its disposable role every later request through that pool fails to
+    authenticate. The symptom appears far from the cause, in unrelated tests.
+    """
+    import inspect
+
+    from scripts import restore_drill
+
+    for function in (
+        restore_drill.prepare_restored_database,
+        restore_drill.verify_restored_database_can_serve,
+    ):
+        source = inspect.getsource(function)
+        assert "READONLY_DB_PASSWORD" not in source, f"{function.__name__} reads the environment"
+        assert "READONLY_DB_USER" not in source, f"{function.__name__} reads the environment"
+        parameters = inspect.signature(function).parameters
+        assert "readonly_role" in parameters and "readonly_password" in parameters
+
+
+def test_ensure_readonly_role_accepts_explicit_credentials() -> None:
+    """The CLI may still read the environment; callers must not have to."""
+    import inspect
+
+    from scripts.init_db import ensure_readonly_role
+
+    parameters = inspect.signature(ensure_readonly_role).parameters
+    assert "role" in parameters and "password" in parameters

@@ -28,6 +28,7 @@ BASELINE_STATEMENT_COUNTS = {
     "07_fix_season_metadata.sql": 1,
     "08_shot_attempts.sql": 7,
     "09_single_season_provenance.sql": 10,
+    "10_schema_hardening.sql": 7,
 }
 
 
