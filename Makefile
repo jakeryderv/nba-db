@@ -196,8 +196,11 @@ seasons:
 test:
 	PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/ -v
 
+# Requires a database holding a manifested season. These assert properties of
+# real data -- thirty teams, a full schedule, shot detail reconciling to box
+# scores -- so they are not part of `make test`, whose fixture seeds two teams.
 test-data:
-	PYTHONPATH=. uv run python db/tests/test_data_quality.py
+	PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest db/tests/ -v
 
 lint:
 	uv run ruff check etl/ app/ db/ scripts/ tests/ .dagger/src/ nba_config.py

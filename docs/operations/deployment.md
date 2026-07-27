@@ -165,6 +165,28 @@ The daily backup, the monthly restore drill, and the freshness check form one lo
   evidence.
 - Pruning fails closed on an unreadable pointer: deleting backups is the irreversible direction.
 
+### Data-quality checks
+
+The drill also runs `db/tests/` against the restored database: referential integrity,
+natural-key uniqueness, game dates falling inside the season, shot detail reconciling to
+box scores, and the season's recorded provenance matching the rows actually present.
+
+These assert properties of a real manifested season — thirty teams, a full schedule — so
+they deliberately do not run in the pull-request pipeline, whose fixture seeds two teams
+and ten games. Pointed at seed data every assertion would have to be loosened until it
+checked nothing. The scheduled drill is the gate where real data exists.
+
+Run them by hand against any loaded database:
+
+```bash
+make test-data                              # uses DATABASE_URL / db config
+DATA_QUALITY_SEASON=2025-26 make test-data  # scope to a specific season
+```
+
+Checks are season-scoped. An unscoped count silently mixes seasons once a database holds
+more than one, and the reconciliation checks would then compare one season's recorded
+provenance against every season's rows.
+
 The public API applies a process-local sliding-window limit per client. Ordinary API reads default
 to 600 requests per minute; the aggregate-heavy shot chart, shot profile, and CSV routes default to
 120. Large responses use gzip when the client advertises support. Override the limits with the
