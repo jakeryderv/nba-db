@@ -28,17 +28,14 @@ def test_extract_and_transform_help_advertise_the_product_default() -> None:
         assert "default: 2025-26" in result.stdout
 
 
-def test_direct_legacy_loader_is_disabled() -> None:
-    result = subprocess.run(
-        [sys.executable, "etl/load.py"],
-        cwd=PROJECT_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def test_the_legacy_loader_is_gone() -> None:
+    """It was retired but still present, and still held four unguarded DELETEs.
 
-    assert result.returncode != 0
-    assert "Direct loading is disabled" in result.stderr
+    Guarding an unreachable file with a runtime error is weaker than not
+    shipping it: the guard is one edit from being removed, the file is not.
+    """
+    assert not (PROJECT_ROOT / "etl" / "load.py").exists()
+    assert not (PROJECT_ROOT / "tests" / "test_etl_load.py").exists()
 
 
 def test_production_dependencies_exclude_etl_and_development_tooling() -> None:

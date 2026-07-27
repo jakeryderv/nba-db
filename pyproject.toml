@@ -58,7 +58,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"etl/load.py" = ["E402"]
 "db/tests/test_data_quality.py" = ["E402"]
 "scripts/init_db.py" = ["E402"]
 "tests/conftest.py" = ["E402"]

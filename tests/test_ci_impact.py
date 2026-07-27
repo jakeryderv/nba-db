@@ -28,7 +28,7 @@ def test_lifecycle_and_docs_changes_select_lifecycle() -> None:
 
 
 def test_mixed_components_select_full() -> None:
-    assert classify_paths(["etl/load.py", "app/static/app.js"]) is Impact.FULL
+    assert classify_paths(["etl/transform.py", "app/static/app.js"]) is Impact.FULL
     assert classify_paths(["app/main.py", "README.md"]) is Impact.FULL
 
 

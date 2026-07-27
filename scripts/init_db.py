@@ -23,35 +23,105 @@ class MigrationChecksumError(RuntimeError):
     """Raised when an already-applied migration has been edited."""
 
 
+DOLLAR_TAG = re.compile(r"\$\$|\$[A-Za-z_][A-Za-z0-9_]*\$")
+
+
+def _has_executable_line(statement: str) -> bool:
+    """Whether a fragment contains anything other than comments and blank lines."""
+    return any(
+        line.strip() and not line.strip().startswith("--") for line in statement.splitlines()
+    )
+
+
+def _scan_delimited(sql: str, start: int, quote: str) -> int:
+    """Return the index just past a quoted run, treating a doubled quote as escaped."""
+    index = start + 1
+    while index < len(sql):
+        if sql[index] == quote:
+            if index + 1 < len(sql) and sql[index + 1] == quote:
+                index += 2
+                continue
+            return index + 1
+        index += 1
+    return len(sql)
+
+
 def split_sql(sql: str) -> list[str]:
-    """Split SQL into statements, respecting dollar-quoted blocks."""
+    """Split SQL into statements, ignoring semicolons that are not statement ends.
+
+    A semicolon only terminates a statement outside string literals, quoted
+    identifiers, comments, and dollar-quoted bodies. The previous implementation
+    tracked only bare `$$`, so a tagged quote such as `$func$`, a `$$` inside a
+    literal, or a semicolon inside a literal or comment would split a statement
+    in the middle.
+
+    That failure is silent rather than loud: the fragments are often individually
+    valid SQL, so a migration applies in pieces and records its checksum as
+    though it had applied whole. Nothing in migrations 01-09 trips it, which is
+    exactly why it is worth fixing before one does.
+    """
     statements: list[str] = []
     buffer: list[str] = []
-    in_dollar_quote = False
-    i = 0
+    index = 0
+    length = len(sql)
+    open_tag: str | None = None
 
-    while i < len(sql):
-        if sql[i : i + 2] == "$$":
-            in_dollar_quote = not in_dollar_quote
-            buffer.append("$$")
-            i += 2
+    while index < length:
+        if open_tag is not None:
+            if sql.startswith(open_tag, index):
+                buffer.append(open_tag)
+                index += len(open_tag)
+                open_tag = None
+            else:
+                buffer.append(sql[index])
+                index += 1
             continue
 
-        if sql[i] == ";" and not in_dollar_quote:
+        if sql.startswith("--", index):
+            end = sql.find("\n", index)
+            end = length if end == -1 else end
+            buffer.append(sql[index:end])
+            index = end
+            continue
+
+        if sql.startswith("/*", index):
+            end = sql.find("*/", index + 2)
+            end = length if end == -1 else end + 2
+            buffer.append(sql[index:end])
+            index = end
+            continue
+
+        character = sql[index]
+        if character in "'\"":
+            end = _scan_delimited(sql, index, character)
+            buffer.append(sql[index:end])
+            index = end
+            continue
+
+        tag = DOLLAR_TAG.match(sql, index)
+        if tag:
+            open_tag = tag.group(0)
+            buffer.append(open_tag)
+            index += len(open_tag)
+            continue
+
+        if character == ";":
             statement = "".join(buffer).strip()
-            if statement and not all(
-                line.strip().startswith("--") or not line.strip() for line in statement.splitlines()
-            ):
+            if statement and _has_executable_line(statement):
                 statements.append(statement)
             buffer = []
-            i += 1
+            index += 1
             continue
 
-        buffer.append(sql[i])
-        i += 1
+        buffer.append(character)
+        index += 1
 
+    # The trailing fragment gets the same comment filter as the others. Without
+    # it, a file that is entirely comments yields one comment-only "statement"
+    # that is then executed -- harmless in PostgreSQL, but an inconsistency that
+    # makes the two paths disagree about what counts as a statement.
     statement = "".join(buffer).strip()
-    if statement:
+    if statement and _has_executable_line(statement):
         statements.append(statement)
 
     return statements

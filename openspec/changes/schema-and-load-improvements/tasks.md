@@ -1,10 +1,10 @@
 ## 1. Prerequisites and deletions
 
-- [ ] 1.1 Add failing tests for `split_sql`: a tagged dollar quote (`$func$`), a `$$` inside a string literal, and a semicolon inside a quoted literal must not split a statement.
-- [ ] 1.2 Harden `split_sql` in `scripts/init_db.py` to satisfy them. This is a prerequisite, not a cleanup: the failure mode is a migration silently applied in fragments.
-- [ ] 1.3 Confirm migrations `01`-`09` still split identically after the change, statement for statement.
-- [ ] 1.4 Delete `etl/load.py` and `tests/test_etl_load.py`, and confirm nothing imports either.
-- [ ] 1.5 Replace the filter-inside-a-loop in `transform_games` with a grouped pass, asserting identical output on the existing fixture before and after.
+- [x] 1.1 Add failing tests for `split_sql`: a tagged dollar quote (`$func$`), a `$$` inside a string literal, and a semicolon inside a quoted literal must not split a statement.
+- [x] 1.2 Harden `split_sql` in `scripts/init_db.py` to satisfy them. This is a prerequisite, not a cleanup: the failure mode is a migration silently applied in fragments.
+- [x] 1.3 Confirm migrations `01`-`09` still split identically after the change, statement for statement.
+- [x] 1.4 Delete `etl/load.py` and `tests/test_etl_load.py`, and confirm nothing imports either.
+- [x] 1.5 Replace the filter-inside-a-loop in `transform_games` with a grouped pass, asserting identical output on the existing fixture before and after.
 
 ## 2. Migration 10
 
