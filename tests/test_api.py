@@ -15,6 +15,34 @@ def test_health(client):
     assert r.headers["cache-control"] == "no-store"
 
 
+def test_readiness_is_never_cached(client, monkeypatch):
+    """The deploy gate must answer for the instance asked, not from a cache.
+
+    /ready decides whether Railway gives an instance traffic, and the ten-minute
+    liveness probe reads it to decide whether production is up. A cached response
+    outlives the instance that produced it, so either would be asserting that
+    production *was* healthy. The app states this rather than inheriting whatever
+    the edge decides: nba.jvs.sh is proxied, and Cloudflare's Browser Cache TTL
+    rewrites Cache-Control on the paths it caches.
+
+    The failing case matters more than the passing one and is the one the response
+    policy used to miss: it sat behind a `status_code < 400` guard, so a 503 shipped
+    with no Cache-Control at all -- the answer that most needs to expire the moment
+    the instance recovers.
+    """
+    # The fixture seeds SEED_SEASON, not DEFAULT_SEASON, so readiness fails here.
+    unready = client.get("/ready")
+    assert unready.status_code == 503
+    assert unready.headers["cache-control"] == "no-store"
+
+    monkeypatch.setattr(
+        "app.main.evaluate_readiness", lambda cur, season: {"status": "ready", "season": season}
+    )
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.headers["cache-control"] == "no-store"
+
+
 def test_health_does_not_expose_database_error(client, monkeypatch):
     @contextmanager
     def broken_cursor():

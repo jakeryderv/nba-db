@@ -252,10 +252,16 @@ def _apply_response_policy(request: Request, response: Response, elapsed_ms: flo
     revision = os.getenv("RAILWAY_GIT_COMMIT_SHA", "development")
     if revision == "development" or re.fullmatch(r"[0-9a-f]{7,40}", revision):
         response.headers["X-Release-Revision"] = revision
-    if request.method == "GET" and response.status_code < 400:
-        if request.url.path == "/health":
-            response.headers["Cache-Control"] = "no-store"
-        elif request.url.path == "/":
+    # Probes answer for one instance at one moment, so a cached answer outlives the
+    # instance that produced it. This sits outside the success guard deliberately: a
+    # cached *failure* is the worse case, since it would keep reporting an instance
+    # down after it recovered, and /ready decides whether Railway gives that instance
+    # traffic at all. Stated here rather than left to the edge -- the domain is
+    # proxied, and Cloudflare rewrites Cache-Control on the paths it caches.
+    if request.url.path in ("/health", "/ready"):
+        response.headers["Cache-Control"] = "no-store"
+    elif request.method == "GET" and response.status_code < 400:
+        if request.url.path == "/":
             response.headers["Cache-Control"] = "no-cache"
         elif request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
