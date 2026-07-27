@@ -31,4 +31,4 @@
 - [x] 4.3 Run `make test-data` against a loaded database and confirm all checks still pass on the new schema.
 - [x] 4.4 Run `openspec validate`.
 - [x] 4.5 Confirm no lifecycle command was executed and no production credential handled.
-- [ ] 4.6 Close #31 in the implementing commit.
+- [x] 4.6 Close #31 in the implementing commit.
