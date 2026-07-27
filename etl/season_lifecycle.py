@@ -978,8 +978,19 @@ def replace_season(
     *,
     single_season: bool = False,
     acquire_advisory_lock: bool = True,
+    verify: Callable[[psycopg.Connection], None] | None = None,
 ) -> None:
-    """Replace validated season data atomically; optionally prune every other season."""
+    """Replace validated season data atomically; optionally prune every other season.
+
+    `verify` runs on this connection after the rows are written and before the
+    transaction commits, so it observes exactly what is about to become visible.
+    Raising from it rolls the whole replacement back, which is the difference
+    between a dataset that fails its checks never being served and one that is
+    served and then reported as bad.
+
+    It has to live inside this function because this function owns the
+    transaction; a caller cannot get between the write and the commit.
+    """
     with conn.transaction():
         with conn.cursor() as cur:
             if acquire_advisory_lock:
@@ -1074,6 +1085,33 @@ def replace_season(
                 ),
             )
             _verify_database(cur, dataset, single_season)
+        if verify is not None:
+            # Still inside the transaction block: raising here rolls back the
+            # replacement rather than reporting a bad dataset that already
+            # committed.
+            verify(conn)
+
+
+def verify_loaded_data(conn: psycopg.Connection, dataset: SeasonDataset) -> None:
+    """Assert the rows just written are correct, before they are committed.
+
+    Runs on the writing connection so it sees the uncommitted replacement. This
+    is the half of verification that can happen before the commit: the deployed
+    API cannot be checked yet, because it reads through its own connections and
+    an uncommitted transaction is invisible to them.
+
+    Uses the same checks the restore drill runs rather than a second copy. Two
+    implementations of a correctness check drift, and the one that drifted is
+    discovered during an incident.
+    """
+    from db.quality_checks import DataQualityError, run_all_checks
+
+    try:
+        run_all_checks(conn, dataset.season)
+    except DataQualityError as exc:
+        raise PromotionSafetyError(
+            f"Replacement data failed verification before commit; rolling back. {exc}"
+        ) from exc
 
 
 def local_db_config() -> dict[str, Any]:
@@ -1491,6 +1529,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         dataset,
                         single_season=True,
                         acquire_advisory_lock=False,
+                        # Staging runs the same pre-commit verification as
+                        # production. The promotion gate compares staging's
+                        # manifest digest and counts, not its data quality, so a
+                        # dataset that is internally broken could otherwise pass
+                        # staging, satisfy the gate, and only be caught once
+                        # production had already taken a backup and a lock.
+                        verify=lambda connection: verify_loaded_data(connection, dataset),
                     )
                 verify_live_api(api_url, dataset)
             print(f"Staging now contains only season {args.season}")
@@ -1511,13 +1556,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         with promotion_operation_lock(config):
             create_backup(config, args.backup_file)
             with psycopg.connect(**config) as conn:
+                # After the backup, so the backup reflects the pre-change schema;
+                # before the replacement, so the write lands on the migrated one.
+                # load-local and stage have always done this; promotion did not,
+                # so a new migration would abort it partway through.
+                apply_schema(conn)
                 replace_season(
                     conn,
                     dataset,
                     single_season=True,
                     acquire_advisory_lock=False,
+                    verify=lambda connection: verify_loaded_data(connection, dataset),
                 )
-            verify_live_api(api_url, dataset)
+            try:
+                verify_live_api(api_url, dataset)
+            except SeasonLifecycleError as exc:
+                # The data was verified before it committed, so reaching here
+                # means the deployment is wrong rather than the dataset. Name the
+                # backup and the procedure: an operator meeting this for the
+                # first time is meeting it under pressure.
+                raise PromotionSafetyError(
+                    f"{exc} Data passed pre-commit verification, so this is a deployment "
+                    f"fault rather than a data fault. Recovery procedure: "
+                    f"docs/operations/season-lifecycle.md#recovering-from-a-failed-promotion. "
+                    f"Backup for this promotion: {args.backup_file}"
+                ) from exc
         print(f"Promoted only season {args.season}; backup: {args.backup_file}")
         return 0
     except SeasonLifecycleError as exc:
