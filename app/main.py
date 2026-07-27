@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from psycopg_pool import PoolTimeout, TooManyRequests
 from starlette.middleware.gzip import GZipMiddleware
 
-from app.db import close_pool, get_cursor, get_pool
+from app.db import acquire_pool, get_cursor, release_pool
 from app.middleware import RequestPolicyMiddleware, apply_error_policy
 from app.models import (
     DatasetCounts,
@@ -88,9 +88,12 @@ def _filename_slug(value: str) -> str:
 async def lifespan(app: FastAPI):
     # Open the pool once at startup. Constructing it lazily from handlers, which
     # run concurrently on a threadpool, lets two cold requests build two pools.
-    get_pool()
+    # Claim it rather than just opening it: this app object can host more than
+    # one lifespan at a time, and an unconditional close on the first shutdown
+    # would take the pool away from the holder still serving.
+    acquire_pool()
     yield
-    close_pool()
+    release_pool()
 
 
 app = FastAPI(
